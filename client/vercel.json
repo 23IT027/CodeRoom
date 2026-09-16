@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/api/piston/:path*", "destination": "https://emkc.org/api/v2/piston/:path*" },
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}
