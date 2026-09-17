@@ -320,16 +320,16 @@ const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             cleanupPeer(socketId)
         }
 
-        const onVoiceOffer = async ({ fromSocketId, offer }: { fromSocketId: string; offer: RTCSessionDescriptionInit }) => {
+        const onVoiceOffer = async ({ fromSocketId, fromUsername, offer }: { fromSocketId: string; fromUsername?: string; offer: RTCSessionDescriptionInit }) => {
             if (!isConnectedRef.current) return
 
-            // Add participant entry if not yet present
+            // Add participant entry if not yet present — use server-provided username, not socket ID
             setVoiceState(prev => {
                 if (prev.participants.has(fromSocketId)) return prev
                 const newParticipants = new Map(prev.participants)
                 newParticipants.set(fromSocketId, {
                     socketId: fromSocketId,
-                    username: fromSocketId, // will be updated if we have user info
+                    username: fromUsername || fromSocketId,  // real username from server
                     isMuted: false,
                     isConnected: false,
                     audioLevel: 0,

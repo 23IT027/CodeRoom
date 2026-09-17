@@ -8,6 +8,7 @@ import { Server } from "socket.io"
 import path from "path"
 import speakeasy from "speakeasy"
 import { OAuth2Client } from "google-auth-library"
+import { spawn } from "child_process"
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || ""
 const googleAuthClient = new OAuth2Client(GOOGLE_CLIENT_ID)
@@ -440,8 +441,10 @@ io.on("connection", (socket) => {
 	})
 
 	socket.on('voice-offer', ({ targetSocketId, offer }) => {
+		const sender = getUserBySocketId(socket.id)
 		io.to(targetSocketId).emit('voice-offer', {
 			fromSocketId: socket.id,
+			fromUsername: sender?.username || socket.id,
 			offer,
 		})
 	})
@@ -470,7 +473,68 @@ io.on("connection", (socket) => {
 			isMuted,
 		})
 	})
+
+	// ─── Interactive Terminal ─────────────────────────────────────────────────
+	let shellProcess: import("child_process").ChildProcess | null = null
+
+	// Strip ANSI/VT escape codes so raw color sequences don't garble the HTML output
+	const stripAnsi = (str: string) =>
+		str.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
+			.replace(/\x1b\][^\x07]*\x07/g, "")
+			.replace(/\x1b[()][AB012]/g, "")
+			.replace(/\r/g, "")  // normalize carriage returns
+
+	socket.on("terminal:start", () => {
+		if (shellProcess) {
+			shellProcess.kill()
+			shellProcess = null
+		}
+		const isWindows = process.platform === "win32"
+		const shell = isWindows ? "cmd.exe" : "bash"
+		const args = isWindows ? [] : []
+
+		// Start shell in project root (two levels up from server/src/)
+		const projectRoot = path.join(__dirname, "..", "..")
+		shellProcess = spawn(shell, args, {
+			env: { ...process.env, TERM: "xterm-color", COLORTERM: "truecolor" },
+			cwd: projectRoot,
+		})
+
+		shellProcess.stdout?.on("data", (data: Buffer) => {
+			socket.emit("terminal:output", stripAnsi(data.toString()))
+		})
+		shellProcess.stderr?.on("data", (data: Buffer) => {
+			socket.emit("terminal:output", stripAnsi(data.toString()))
+		})
+		shellProcess.on("exit", () => {
+			socket.emit("terminal:output", "\n[Shell exited]\n")
+			shellProcess = null
+		})
+
+		socket.emit("terminal:output", `\r\n> Shell started in: ${projectRoot}\r\n\r\n`)
+	})
+
+	socket.on("terminal:input", (data: string) => {
+		if (shellProcess?.stdin?.writable) {
+			shellProcess.stdin.write(data)
+		}
+	})
+
+	socket.on("terminal:stop", () => {
+		if (shellProcess) {
+			shellProcess.kill()
+			shellProcess = null
+		}
+	})
+
+	socket.on("disconnect", () => {
+		if (shellProcess) {
+			shellProcess.kill()
+			shellProcess = null
+		}
+	})
 })
+
 
 const PORT = process.env.PORT || 3000
 

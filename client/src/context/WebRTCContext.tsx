@@ -149,9 +149,34 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         return pc
     }, [socket, cleanupWebRTC])
 
-    // ─── Get User Media ──────────────────────────────────────────────────────────
+    // ─── Get User Media (video+audio, fallback to audio-only) ───────────────────
     const getUserMedia = useCallback(async () => {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        let stream: MediaStream
+        try {
+            // Try with video first
+            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        } catch (videoErr: unknown) {
+            const name = (videoErr as { name?: string }).name
+            if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+                // No camera — fall back to audio only
+                toast('No camera found — joining with audio only 🎙️', { icon: '⚠️' })
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true })
+                } catch (audioErr: unknown) {
+                    const aName = (audioErr as { name?: string }).name
+                    if (aName === 'NotAllowedError' || aName === 'PermissionDeniedError') {
+                        throw new Error('PERMISSION_DENIED')
+                    }
+                    throw audioErr
+                }
+            } else if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+                throw new Error('PERMISSION_DENIED')
+            } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+                throw new Error('DEVICE_IN_USE')
+            } else {
+                throw videoErr
+            }
+        }
         localStreamRef.current = stream
         setCallState(prev => ({ ...prev, localStream: stream }))
         return stream
@@ -188,7 +213,14 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             toast.success(`Calling ${targetUser.username}...`)
         } catch (error) {
             console.error('[WebRTC] Failed to initiate call:', error)
-            toast.error('Failed to access camera/microphone')
+            const msg = (error as Error).message
+            if (msg === 'PERMISSION_DENIED') {
+                toast.error('Camera/microphone access denied. Click the 🔒 icon in your browser address bar and allow permissions, then try again.')
+            } else if (msg === 'DEVICE_IN_USE') {
+                toast.error('Camera or microphone is already in use by another app. Close other video apps and try again.')
+            } else {
+                toast.error('Could not access camera/microphone. Make sure devices are connected and browser has permission.')
+            }
             cleanupWebRTC()
         }
     }, [socket, getUserMedia, createPeerConnection, cleanupWebRTC])
@@ -208,8 +240,14 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             toast.success('Call accepted')
         } catch (error) {
             console.error('[WebRTC] Failed to accept call:', error)
-            toast.error('Failed to access camera/microphone')
-            // reject using the ref so we don't need rejectCall in deps
+            const msg = (error as Error).message
+            if (msg === 'PERMISSION_DENIED') {
+                toast.error('Camera/microphone access denied — allow permissions in browser and try again.')
+            } else if (msg === 'DEVICE_IN_USE') {
+                toast.error('Camera is already in use by another app. Close it and try again.')
+            } else {
+                toast.error('Could not access camera/microphone.')
+            }
             const caller = callStateRef.current.caller
             if (caller) socket.emit(SocketEvent.CALL_REJECT, makeTarget(caller))
             cleanupWebRTC()

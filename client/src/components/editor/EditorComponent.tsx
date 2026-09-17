@@ -6,7 +6,7 @@ import Editor from "./Editor"
 import FileTab from "./FileTab"
 import TerminalPanel from "@/components/terminal/TerminalPanel"
 import { useRunCode } from "@/context/RunCodeContext"
-import { LuPlay, LuTerminal, LuSquare } from "react-icons/lu"
+import { LuPlay, LuTerminal, LuStopCircle } from "react-icons/lu"
 
 function EditorComponent() {
     const { openFiles, activeFile } = useFileSystem()
@@ -51,7 +51,7 @@ function EditorComponent() {
                                     : "bg-primary text-black hover:bg-primary/80"
                             )}
                         >
-                            {isRunning ? <LuSquare size={12} /> : <LuPlay size={12} />}
+                            {isRunning ? <LuStopCircle size={12} /> : <LuPlay size={12} />}
                             {isRunning ? "Running…" : "Run"}
                         </button>
                     )}
