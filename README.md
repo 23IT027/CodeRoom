@@ -43,7 +43,7 @@ You can view the live preview of the project [here](https://github.com/jeel1811/
 1. **Fork this repository:** Click the Fork button located in the top-right corner of this page.
 2. **Clone the repository:**
    ```bash
-   git clone https://github.com/<your-username>/CodeColabAI.git
+   git clone https://github.com/<your-username>/Code-Room---updated-code.git
    ```
 3. **Create .env file:**
    Inside the client and server directories create `.env` and set:
