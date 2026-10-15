@@ -120,7 +120,7 @@ function RunView() {
                         {/* Mode Description */}
                         <div className="mt-2 text-xs text-gray-400 text-center">
                             {currentMode === 'code' 
-                                ? '🔧 Execute single files with Piston API' 
+                                ? '🔧 Execute code (C++, JS, Python, Java, etc.)' 
                                 : currentMode === 'preview'
                                 ? '🚀 Live React preview with Sandpack'
                                 : '⚡ Full-stack deployment with StackBlitz'

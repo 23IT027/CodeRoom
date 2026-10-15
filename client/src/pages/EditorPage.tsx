@@ -15,6 +15,9 @@ import { useEffect } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 import { Toaster } from 'react-hot-toast'
 
+import { useAuth } from "@/context/AuthContext"
+import { toast } from "react-hot-toast"
+
 function EditorPage() {
     // online/offline status
     useUserActivity()
@@ -25,22 +28,35 @@ function EditorPage() {
     const roomId = roomIdParam ? decodeURIComponent(roomIdParam) : undefined
     const { status, setCurrentUser, currentUser } = useAppContext()
     const { socket } = useSocket()
+    const { user: authUser, isAuthenticated, isLoading } = useAuth()
     const location = useLocation()
 
     useEffect(() => {
-        if (currentUser.username.length > 0) return
-        const username = location.state?.username
-        if (username === undefined) {
-            navigate("/", {
-                state: { roomId },
+        if (isLoading) return
+
+        // Guard against unauthenticated access
+        if (!isAuthenticated || !authUser) {
+            toast.error("Please sign in or create an account to enter this room")
+            navigate("/login", {
+                state: { redirectTo: roomId ? `/editor/${encodeURIComponent(roomId)}` : "/" },
+                replace: true,
             })
-        } else if (roomId) {
+            return
+        }
+
+        const username = location.state?.username || authUser.username || authUser.name
+        if (roomId && (!currentUser.username || !currentUser.roomId)) {
             const user: User = { username, roomId }
             setCurrentUser(user)
-            socket.emit(SocketEvent.JOIN_REQUEST, user)
+            const token = localStorage.getItem("coderoom_token")
+            socket.emit(SocketEvent.JOIN_REQUEST, { ...user, token })
         }
     }, [
+        authUser,
+        currentUser.roomId,
         currentUser.username,
+        isAuthenticated,
+        isLoading,
         location.state?.username,
         navigate,
         roomId,

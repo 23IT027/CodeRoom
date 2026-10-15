@@ -41,23 +41,21 @@ export function RunCodeProvider({ children }: RunCodeProviderProps) {
 
     const { activeFile } = useFileSystem()
 
-    // Fetch supported languages from Piston API
+    // Fetch supported languages via our server proxy
     useEffect(() => {
         const fetchLanguages = async () => {
             try {
                 const response = await axiosInstance.get('/runtimes')
                 setSupportedLanguages(response.data)
             } catch {
-                // Fallback list if Piston is unreachable
+                // Fallback list if server runtimes endpoint is slow or unreachable
                 setSupportedLanguages([
-                    { language: 'javascript', version: '18.15.0', aliases: ['js', 'node'] },
-                    { language: 'python', version: '3.10.0', aliases: ['py', 'python3'] },
-                    { language: 'java', version: '15.0.2', aliases: [] },
-                    { language: 'cpp', version: '10.2.0', aliases: ['c++'] },
-                    { language: 'c', version: '10.2.0', aliases: ['gcc'] },
-                    { language: 'typescript', version: '5.0.3', aliases: ['ts'] },
-                    { language: 'go', version: '1.16.2', aliases: [] },
-                    { language: 'rust', version: '1.50.0', aliases: ['rs'] },
+                    { language: 'javascript', version: 'Node.js 20', aliases: ['js', 'node'] },
+                    { language: 'python',     version: 'Python 3.12', aliases: ['py', 'python3'] },
+                    { language: 'java',       version: 'JDK 17',     aliases: [] },
+                    { language: 'cpp',        version: 'GCC 14.1',   aliases: ['c++', 'cxx', 'cc'] },
+                    { language: 'c',          version: 'GCC 14.1',   aliases: [] },
+                    { language: 'typescript', version: 'TS 5.5',     aliases: ['ts'] },
                 ])
             }
         }
@@ -109,28 +107,31 @@ export function RunCodeProvider({ children }: RunCodeProviderProps) {
             if (result.compile?.stdout) out += `[Compile Output]\n${result.compile.stdout}\n`
             if (result.compile?.stderr) out += `[Compile Errors]\n${result.compile.stderr}\n`
             if (result.run?.stdout) out += result.run.stdout
-            if (result.run?.stderr) out += `\n[Stderr]\n${result.run.stderr}`
+            if (result.run?.stderr) out += `${out.endsWith('\n') || !out ? '' : '\n'}[Stderr]\n${result.run.stderr}`
 
             setOutput(out.trim() || '(no output)')
 
-            if (result.run?.stderr) toast.error('Runtime error occurred')
-            else toast.success('Executed successfully')
+            const hasCompileErr = Boolean(result.compile?.stderr?.trim())
+            const hasRunErr = Boolean(result.run?.stderr?.trim()) || (result.run?.code !== undefined && result.run?.code !== 0)
+
+            if (hasCompileErr) {
+                toast.error('Compilation error')
+            } else if (hasRunErr) {
+                toast.error('Runtime error occurred')
+            } else {
+                toast.success('Executed successfully')
+            }
         } catch (error: any) {
             const status = error?.response?.status
             let msg = ''
-            if (status === 401 || status === 403) {
-                msg =
-                    `❌  The Piston code execution API is currently restricted.\n\n` +
-                    `The public Piston API (emkc.org) now requires authentication.\n\n` +
-                    `💡 Workaround: Self-host Piston locally:\n` +
-                    `   docker run -dp 2000:2000 ghcr.io/engineer-man/piston\n` +
-                    `   Then set VITE_PISTON_URL=http://localhost:2000/api/v2 in .env`
-            } else if (status === 400) {
+            if (status === 400) {
                 msg = `❌  Bad request — language "${langToUse.language}" may not be supported.\nTry selecting a different language.`
             } else if (status === 429) {
                 msg = `❌  Rate limited — please wait a moment and try again.`
+            } else if (status === 502 || status === 503) {
+                msg = `❌  Code execution service is temporarily unreachable.\nPlease try again in a few moments.`
             } else {
-                msg = `❌  ${error?.message || 'Unknown error'}`
+                msg = `❌  ${error?.response?.data?.error || error?.message || 'Unknown error'}\n\nMake sure the server is running on ${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}.`
             }
             setOutput(msg)
             toast.error('Execution failed')

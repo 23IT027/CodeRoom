@@ -1,24 +1,26 @@
 import illustration from "@/assets/illustration.svg"
 import FormComponent from "@/components/forms/FormComponent"
-// import Footer from "@/components/common/Footer";
+import Navbar from "@/components/common/Navbar"
 
 function HomePage() {
     return (
-        <div className="flex min-h-screen flex-col items-center justify-center gap-16 animate-page-fade-in">
-            <div className="my-12 flex h-full min-w-full flex-col items-center justify-evenly sm:flex-row sm:pt-0">
-                <div className="flex w-full animate-up-down justify-center sm:w-1/2 sm:pl-4">
-                    <img
-                        src={illustration}
-                        alt="Code Sync Illustration"
-                        className="mx-auto w-[250px] sm:w-[400px] animate-fade-in"
-                        loading="lazy"
-                    />
+        <div className="flex min-h-screen flex-col bg-dark text-light">
+            <Navbar />
+            <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 animate-page-fade-in">
+                <div className="my-8 flex h-full w-full max-w-6xl flex-col items-center justify-evenly gap-8 lg:flex-row">
+                    <div className="flex w-full animate-up-down justify-center lg:w-1/2">
+                        <img
+                            src={illustration}
+                            alt="Code Room Real-time Collaboration Illustration"
+                            className="mx-auto w-[240px] sm:w-[380px] lg:w-[440px] drop-shadow-[0_10px_30px_rgba(57,224,121,0.15)] animate-fade-in"
+                            loading="lazy"
+                        />
+                    </div>
+                    <div className="flex w-full items-center justify-center lg:w-1/2">
+                        <FormComponent />
+                    </div>
                 </div>
-                <div className="flex w-full items-center justify-center sm:w-1/2">
-                    <FormComponent />
-                </div>
-            </div>
-            {/* <Footer /> */}
+            </main>
         </div>
     )
 }

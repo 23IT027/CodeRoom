@@ -1,11 +1,11 @@
 import axios, { AxiosInstance } from "axios"
 
-// Judge0 CE public instance — free, no API key required for basic use
-// Alternatively falls back to emkc Piston if Judge0 is unavailable
-const PISTON_URL = "https://emkc.org/api/v2/piston"
+// Route all code execution through our own server proxy.
+// This avoids browser CORS and auth restrictions on the public Piston API.
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:3000"
 
 const instance: AxiosInstance = axios.create({
-    baseURL: PISTON_URL,
+    baseURL: `${SERVER_URL}/api`,
     headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",

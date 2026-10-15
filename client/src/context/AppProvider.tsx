@@ -1,4 +1,5 @@
 import { ReactNode } from "react"
+import { AuthProvider } from "./AuthContext.tsx"
 import { AppContextProvider } from "./AppContext.js"
 import { ChatContextProvider } from "./ChatContext.jsx"
 import { FileContextProvider } from "./FileContext.jsx"
@@ -13,29 +14,31 @@ import { PopupProvider } from "./PopupContext.tsx"
 
 function AppProvider({ children }: { children: ReactNode }) {
     return (
-        <AppContextProvider>
-            <SocketProvider>
-                <WebRTCProvider>
-                    <VoiceProvider>
-                        <SettingContextProvider>
-                            <ViewContextProvider>
-                                <FileContextProvider>
-                                    <CopilotContextProvider>
-                                        <RunCodeProvider>
-                                            <PopupProvider>
-                                                <ChatContextProvider>
-                                                    {children}
-                                                </ChatContextProvider>
-                                            </PopupProvider>
-                                        </RunCodeProvider>
-                                    </CopilotContextProvider>
-                                </FileContextProvider>
-                            </ViewContextProvider>
-                        </SettingContextProvider>
-                    </VoiceProvider>
-                </WebRTCProvider>
-            </SocketProvider>
-        </AppContextProvider>
+        <AuthProvider>
+            <AppContextProvider>
+                <SocketProvider>
+                    <WebRTCProvider>
+                        <VoiceProvider>
+                            <SettingContextProvider>
+                                <ViewContextProvider>
+                                    <FileContextProvider>
+                                        <CopilotContextProvider>
+                                            <RunCodeProvider>
+                                                <PopupProvider>
+                                                    <ChatContextProvider>
+                                                        {children}
+                                                    </ChatContextProvider>
+                                                </PopupProvider>
+                                            </RunCodeProvider>
+                                        </CopilotContextProvider>
+                                    </FileContextProvider>
+                                </ViewContextProvider>
+                            </SettingContextProvider>
+                        </VoiceProvider>
+                    </WebRTCProvider>
+                </SocketProvider>
+            </AppContextProvider>
+        </AuthProvider>
     )
 }
 

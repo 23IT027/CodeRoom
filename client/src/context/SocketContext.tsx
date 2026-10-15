@@ -41,7 +41,13 @@ const SocketProvider = ({ children }: { children: ReactNode }) => {
     const socket: Socket = useMemo(
         () =>
             io(BACKEND_URL, {
-                reconnectionAttempts: 2,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000,
+                timeout: 10000,
+                auth: (cb) => {
+                    const token = localStorage.getItem("coderoom_token")
+                    cb({ token })
+                },
             }),
         [],
     )
