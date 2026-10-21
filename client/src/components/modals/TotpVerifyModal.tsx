@@ -8,7 +8,7 @@ interface TotpVerifyModalProps {
     onSuccess: () => void
 }
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:3000"
+const SERVER_URL = (import.meta.env.VITE_SERVER_URL || "http://localhost:3000").replace(/\/+$/, "")
 
 const TotpVerifyModal = ({ roomId, onClose, onSuccess }: TotpVerifyModalProps) => {
     const [token, setToken] = useState("")

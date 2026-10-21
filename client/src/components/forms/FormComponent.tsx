@@ -14,7 +14,7 @@ import TotpVerifyModal from "@/components/modals/TotpVerifyModal"
 import { IoLockClosed, IoLockOpen, IoLogOutOutline } from "react-icons/io5"
 // import logo from "@/assets/logo.svg"
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:3000"
+const SERVER_URL = (import.meta.env.VITE_SERVER_URL || "http://localhost:3000").replace(/\/+$/, "")
 const MIN_ROOM_NAME_LENGTH = 2
 const MIN_USERNAME_LENGTH = 3
 

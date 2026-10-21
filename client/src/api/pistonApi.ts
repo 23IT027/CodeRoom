@@ -2,7 +2,7 @@ import axios, { AxiosInstance } from "axios"
 
 // Route all code execution through our own server proxy.
 // This avoids browser CORS and auth restrictions on the public Piston API.
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:3000"
+const SERVER_URL = (import.meta.env.VITE_SERVER_URL || "http://localhost:3000").replace(/\/+$/, "")
 
 const instance: AxiosInstance = axios.create({
     baseURL: `${SERVER_URL}/api`,
