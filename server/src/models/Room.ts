@@ -40,6 +40,7 @@ const RoomSchema = new Schema(
 		createdBy: { type: String, required: true, trim: true },
 		twoFa: { type: TwoFaSchema, default: () => ({ enabled: false }) },
 		members: { type: [MemberSchema], default: [] },
+		fileStructure: { type: Schema.Types.Mixed, default: null },
 		lastActiveAt: { type: Date, default: Date.now },
 	},
 	{

@@ -197,7 +197,22 @@ io.on("connection", (socket) => {
 			socket.join(normalizedRoomId)
 			socket.broadcast.to(normalizedRoomId).emit(SocketEvent.USER_JOINED, { user })
 			const users = getUsersInRoom(normalizedRoomId)
-			io.to(socket.id).emit(SocketEvent.JOIN_ACCEPTED, { user, users })
+			let savedFileStructure: any = null
+			if (isDBConnected()) {
+				try {
+					const roomDoc = await Room.findOne({ roomId: normalizedRoomId })
+						.select("fileStructure")
+						.lean()
+					savedFileStructure = roomDoc?.fileStructure || null
+				} catch (err) {
+					console.error("Error reading room fileStructure:", err)
+				}
+			}
+			io.to(socket.id).emit(SocketEvent.JOIN_ACCEPTED, {
+				user,
+				users,
+				fileStructure: savedFileStructure,
+			})
 		} catch (err) {
 			console.error("JOIN_REQUEST failed:", err)
 		}
@@ -217,14 +232,38 @@ io.on("connection", (socket) => {
 	// Handle file actions
 	socket.on(
 		SocketEvent.SYNC_FILE_STRUCTURE,
-		({ fileStructure, openFiles, activeFile, socketId }) => {
+		async ({ fileStructure, openFiles, activeFile, socketId }) => {
 			io.to(socketId).emit(SocketEvent.SYNC_FILE_STRUCTURE, {
 				fileStructure,
 				openFiles,
 				activeFile,
 			})
+			const roomId = getRoomId(socket.id)
+			if (roomId && isDBConnected() && fileStructure) {
+				try {
+					await Room.updateOne(
+						{ roomId },
+						{ $set: { fileStructure, lastActiveAt: new Date() } }
+					)
+				} catch (e) {
+					console.error("Failed to persist fileStructure:", e)
+				}
+			}
 		}
 	)
+
+	socket.on("save-room-files", async ({ roomId, fileStructure }) => {
+		const targetRoomId = roomId || getRoomId(socket.id)
+		if (!targetRoomId || !isDBConnected() || !fileStructure) return
+		try {
+			await Room.updateOne(
+				{ roomId: targetRoomId },
+				{ $set: { fileStructure, lastActiveAt: new Date() } }
+			)
+		} catch (err) {
+			console.error("Failed to save room files to MongoDB:", err)
+		}
+	})
 	socket.on(
 		SocketEvent.DIRECTORY_CREATED,
 		({ parentDirId, newDirectory }) => {

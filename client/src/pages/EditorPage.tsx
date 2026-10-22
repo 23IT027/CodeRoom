@@ -15,7 +15,6 @@ import { useEffect, useRef } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 import { useAuth } from "@/context/AuthContext"
 import { toast } from "react-hot-toast"
-import { useFileSystem } from "@/context/FileContext"
 import { useVoice } from "@/context/VoiceContext"
 import { useWebRTC } from "@/context/WebRTCContext"
 import { useChatRoom } from "@/context/ChatContext"
@@ -31,7 +30,6 @@ function EditorPage() {
     const { status, setCurrentUser, currentUser, setUsers, setDrawingData, setStatus } = useAppContext()
     const { socket } = useSocket()
     const { user: authUser, isAuthenticated, isLoading } = useAuth()
-    const { resetWorkspace } = useFileSystem()
     const { leaveVoiceChannel, voiceState } = useVoice()
     const { endCall, callState } = useWebRTC()
     const { setMessages } = useChatRoom()
@@ -80,10 +78,7 @@ function EditorPage() {
             // 3. Clear chat messages from the old room
             setMessages([])
 
-            // 4. Reset workspace files & open tabs for the new room (opens index.js by default)
-            resetWorkspace()
-
-            // 5. Reset whiteboard drawing & users list
+            // 4. Reset whiteboard drawing & users list
             setDrawingData(null)
             setUsers([])
             setStatus(USER_STATUS.INITIAL)
@@ -113,7 +108,6 @@ function EditorPage() {
         leaveVoiceChannel,
         location.state?.username,
         navigate,
-        resetWorkspace,
         roomId,
         setCurrentUser,
         setDrawingData,

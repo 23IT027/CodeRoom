@@ -21,7 +21,7 @@ import { cursorTooltipBaseTheme, tooltipField } from "./tooltip"
 
 function Editor() {
     const { users, currentUser } = useAppContext()
-    const { activeFile, setActiveFile } = useFileSystem()
+    const { activeFile, setActiveFile, updateFileContent } = useFileSystem()
     const { theme, language, fontSize } = useSettings()
     const { socket } = useSocket()
     const { viewHeight } = useResponsive()
@@ -37,6 +37,7 @@ function Editor() {
 
         const file: FileSystemItem = { ...activeFile, content: code }
         setActiveFile(file)
+        updateFileContent(activeFile.id, code)
         const cursorPosition = view.state?.selection?.main?.head
         socket.emit(SocketEvent.TYPING_START, { cursorPosition })
         socket.emit(SocketEvent.FILE_UPDATED, {
