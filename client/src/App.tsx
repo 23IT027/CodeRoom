@@ -32,6 +32,12 @@ const App = () => {
                             secondary: "#212429",
                         },
                     },
+                    error: {
+                        iconTheme: {
+                            primary: "#ef4444",
+                            secondary: "#212429",
+                        },
+                    },
                 }}
             />
         </>

@@ -13,8 +13,6 @@ import { SocketEvent } from "@/types/socket"
 import { USER_STATUS, User } from "@/types/user"
 import { useEffect } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
-import { Toaster } from 'react-hot-toast'
-
 import { useAuth } from "@/context/AuthContext"
 import { toast } from "react-hot-toast"
 
@@ -79,30 +77,6 @@ function EditorPage() {
             <IncomingCallModal />
             <VideoCallWindow />
             <FloatingVoiceStatus />
-            
-            {/* Toast Notifications */}
-            <Toaster 
-                position="top-right"
-                toastOptions={{
-                    style: {
-                        background: '#212429',
-                        color: '#f5f5f5',
-                        border: '1px solid #3D404A',
-                    },
-                    success: {
-                        iconTheme: {
-                            primary: '#39E079',
-                            secondary: '#212429',
-                        },
-                    },
-                    error: {
-                        iconTheme: {
-                            primary: '#ef4444',
-                            secondary: '#212429',
-                        },
-                    },
-                }}
-            />
         </>
     )
 }
