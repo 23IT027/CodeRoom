@@ -160,6 +160,27 @@ function FileContextProvider({ children }: { children: ReactNode }) {
         }
     }, [setItem])
 
+    // Reset workspace when switching rooms without showing confusing toasts
+    const resetWorkspace = useCallback(() => {
+        const freshInitial: FileSystemItem = {
+            name: "root",
+            id: uuidv4(),
+            type: "directory",
+            children: [
+                {
+                    id: uuidv4(),
+                    type: "file",
+                    name: "index.js",
+                    content: `function sayHi() {\n  console.log("👋 Hello world");\n}\n\nsayHi()`,
+                },
+            ],
+        }
+        const defaultFile = freshInitial.children?.[0] || null
+        setFileStructure(freshInitial)
+        setOpenFiles(defaultFile ? [defaultFile] : [])
+        setActiveFile(defaultFile)
+    }, [])
+
     // Function to toggle the isOpen property of a directory (Directory Open/Close)
     const toggleDirectory = (dirId: Id) => {
         const toggleDir = (directory: FileSystemItem): FileSystemItem => {
@@ -893,7 +914,10 @@ function FileContextProvider({ children }: { children: ReactNode }) {
                 fileStructure,
                 openFiles,
                 activeFile,
+                setFileStructure,
+                setOpenFiles,
                 setActiveFile,
+                resetWorkspace,
                 closeFile,
                 toggleDirectory,
                 collapseDirectories,

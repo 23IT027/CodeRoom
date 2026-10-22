@@ -19,7 +19,6 @@ import { useFileSystem } from "@/context/FileContext"
 import { useVoice } from "@/context/VoiceContext"
 import { useWebRTC } from "@/context/WebRTCContext"
 import { useChatRoom } from "@/context/ChatContext"
-import { initialFileStructure } from "@/utils/file"
 
 function EditorPage() {
     // online/offline status
@@ -32,8 +31,8 @@ function EditorPage() {
     const { status, setCurrentUser, currentUser, setUsers, setDrawingData, setStatus } = useAppContext()
     const { socket } = useSocket()
     const { user: authUser, isAuthenticated, isLoading } = useAuth()
-    const { setFileStructure, setOpenFiles, setActiveFile } = useFileSystem()
-    const { leaveVoiceChannel, isConnected: isVoiceConnected } = useVoice()
+    const { resetWorkspace } = useFileSystem()
+    const { leaveVoiceChannel, voiceState } = useVoice()
     const { endCall, callState } = useWebRTC()
     const { setMessages } = useChatRoom()
     const location = useLocation()
@@ -62,7 +61,7 @@ function EditorPage() {
 
             // 1. Leave any active voice channel
             try {
-                if (isVoiceConnected) {
+                if (voiceState.isConnected) {
                     leaveVoiceChannel()
                 }
             } catch (err) {
@@ -81,10 +80,8 @@ function EditorPage() {
             // 3. Clear chat messages from the old room
             setMessages([])
 
-            // 4. Reset workspace files & open tabs for the new room
-            setFileStructure(initialFileStructure)
-            setOpenFiles([])
-            setActiveFile(null)
+            // 4. Reset workspace files & open tabs for the new room (opens index.js by default)
+            resetWorkspace()
 
             // 5. Reset whiteboard drawing & users list
             setDrawingData(null)
@@ -113,20 +110,18 @@ function EditorPage() {
         endCall,
         isAuthenticated,
         isLoading,
-        isVoiceConnected,
         leaveVoiceChannel,
         location.state?.username,
         navigate,
+        resetWorkspace,
         roomId,
-        setActiveFile,
         setCurrentUser,
         setDrawingData,
-        setFileStructure,
         setMessages,
-        setOpenFiles,
         setStatus,
         setUsers,
         socket,
+        voiceState.isConnected,
     ])
 
     if (status === USER_STATUS.CONNECTION_FAILED) {

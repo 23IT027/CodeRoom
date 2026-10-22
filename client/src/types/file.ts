@@ -15,7 +15,10 @@ interface FileContext {
     fileStructure: FileSystemItem
     openFiles: FileSystemItem[]
     activeFile: FileSystemItem | null
-    setActiveFile: (file: FileSystemItem) => void
+    setFileStructure: (fileStructure: FileSystemItem) => void
+    setOpenFiles: (files: FileSystemItem[]) => void
+    setActiveFile: (file: FileSystemItem | null) => void
+    resetWorkspace: () => void
     closeFile: (fileId: Id) => void
     toggleDirectory: (dirId: Id) => void
     collapseDirectories: () => void

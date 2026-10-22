@@ -83,7 +83,7 @@ function Editor() {
         <CodeMirror
             theme={editorThemes[theme]}
             onChange={onCodeChange}
-            value={activeFile?.content}
+            value={activeFile?.content || ""}
             extensions={extensions}
             minHeight="100%"
             maxWidth="100vw"
