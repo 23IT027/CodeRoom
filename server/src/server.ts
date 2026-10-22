@@ -110,7 +110,7 @@ io.on("connection", (socket) => {
 				return
 			}
 
-			// Clean up previous room memberships for this socket before joining new room
+			// 1. Clean up previous room memberships for this socket before joining new room
 			const prevEntries = userSocketMap.filter((u) => u.socketId === socket.id)
 			for (const prevUser of prevEntries) {
 				if (prevUser.roomId !== normalizedRoomId) {
@@ -123,16 +123,26 @@ io.on("connection", (socket) => {
 					socket.leave(prevUser.roomId)
 				}
 			}
-			userSocketMap = userSocketMap.filter((u) => u.socketId !== socket.id)
 
-			// Check is username exist in the room (ignoring this socket)
-			const isUsernameExist = getUsersInRoom(normalizedRoomId).filter(
-				(u) => u.username.toLowerCase() === normalizedUsername.toLowerCase() && u.socketId !== socket.id
+			// 2. Clean up any existing/stale session for this same username in the target room
+			// (e.g. from previous visits, page reloads, tab switches, or room switches)
+			const staleUsersInRoom = getUsersInRoom(normalizedRoomId).filter(
+				(u) => u.username.toLowerCase() === normalizedUsername.toLowerCase()
 			)
-			if (isUsernameExist.length > 0) {
-				io.to(socket.id).emit(SocketEvent.USERNAME_EXISTS)
-				return
+			for (const stale of staleUsersInRoom) {
+				if (stale.socketId !== socket.id) {
+					const staleSocket = io.sockets.sockets.get(stale.socketId)
+					if (staleSocket) {
+						staleSocket.leave(normalizedRoomId)
+						staleSocket.emit("room-switched", { roomId: normalizedRoomId })
+					}
+				}
 			}
+
+			// Remove this socket's old entries AND any old entries for this username in target room
+			userSocketMap = userSocketMap.filter(
+				(u) => u.socketId !== socket.id && !(u.roomId === normalizedRoomId && u.username.toLowerCase() === normalizedUsername.toLowerCase())
+			)
 
 			// Persist room + user in MongoDB (live presence stays in memory)
 			if (isDBConnected()) {
