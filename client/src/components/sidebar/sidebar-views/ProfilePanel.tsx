@@ -1,10 +1,11 @@
 import { useAuth } from "@/context/AuthContext"
+import { useAppContext } from "@/context/AppContext"
 import { useEffect, useRef, useState, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import axios from "axios"
 import { IoPersonOutline, IoLogOutOutline, IoTimeOutline } from "react-icons/io5"
 import { MdOutlineMeetingRoom } from "react-icons/md"
-import { LuCrown, LuUsers, LuExternalLink, LuRefreshCw } from "react-icons/lu"
+import { LuCrown, LuUsers, LuExternalLink, LuRefreshCw, LuArrowRight } from "react-icons/lu"
 import { toast } from "react-hot-toast"
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || "http://localhost:3000").replace(/\/+$/, "")
@@ -39,13 +40,16 @@ function timeAgo(dateStr: string): string {
 
 export default function ProfilePanel({ isOpen, onClose }: ProfilePanelProps) {
     const { user, token, logout } = useAuth()
+    const { currentUser } = useAppContext()
     const navigate = useNavigate()
     const panelRef = useRef<HTMLDivElement>(null)
 
     const [rooms, setRooms] = useState<RoomEntry[]>([])
     const [loading, setLoading] = useState(false)
-    const [fetched, setFetched] = useState(false)
     const [filter, setFilter] = useState<"all" | "created" | "joined">("all")
+    const [quickRoom, setQuickRoom] = useState("")
+
+    const currentRoomId = currentUser?.roomId || ""
 
     const fetchRooms = useCallback(async () => {
         if (!token) return
@@ -55,7 +59,6 @@ export default function ProfilePanel({ isOpen, onClose }: ProfilePanelProps) {
                 headers: { Authorization: `Bearer ${token}` },
             })
             setRooms(res.data.rooms || [])
-            setFetched(true)
         } catch {
             toast.error("Could not load room history")
         } finally {
@@ -63,12 +66,12 @@ export default function ProfilePanel({ isOpen, onClose }: ProfilePanelProps) {
         }
     }, [token])
 
-    // Fetch rooms when panel opens (once, then manual refresh)
+    // Fetch rooms when panel opens
     useEffect(() => {
-        if (isOpen && !fetched) {
+        if (isOpen) {
             fetchRooms()
         }
-    }, [isOpen, fetched, fetchRooms])
+    }, [isOpen, fetchRooms])
 
     // Close on outside click
     useEffect(() => {
@@ -92,9 +95,15 @@ export default function ProfilePanel({ isOpen, onClose }: ProfilePanelProps) {
         return () => document.removeEventListener("keydown", handler)
     }, [isOpen, onClose])
 
-    const switchRoom = (roomId: string) => {
+    const switchRoom = (targetRoomId: string) => {
+        const normalized = targetRoomId.trim()
+        if (!normalized) return
+        if (normalized === currentRoomId) {
+            toast("You are currently in this room", { icon: "📍" })
+            return
+        }
         onClose()
-        navigate(`/editor/${encodeURIComponent(roomId)}`)
+        navigate(`/editor/${encodeURIComponent(normalized)}`)
     }
 
     const handleLogout = () => {
@@ -182,8 +191,37 @@ export default function ProfilePanel({ isOpen, onClose }: ProfilePanelProps) {
                     </button>
                 </div>
 
+                {/* Quick Join / Switch Input */}
+                <form
+                    onSubmit={(e) => {
+                        e.preventDefault()
+                        if (quickRoom.trim()) {
+                            switchRoom(quickRoom)
+                            setQuickRoom("")
+                        }
+                    }}
+                    className="flex items-center gap-2 px-3 pt-3 pb-1"
+                >
+                    <input
+                        type="text"
+                        value={quickRoom}
+                        onChange={(e) => setQuickRoom(e.target.value)}
+                        placeholder="Switch to any room ID..."
+                        className="flex-1 min-w-0 rounded-lg bg-white/[0.05] border border-white/10 px-2.5 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 transition-colors"
+                    />
+                    <button
+                        type="submit"
+                        disabled={!quickRoom.trim()}
+                        className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-dark bg-primary hover:bg-primary/90 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                        title="Switch or join room"
+                    >
+                        <span>Go</span>
+                        <LuArrowRight size={12} />
+                    </button>
+                </form>
+
                 {/* Room History Header with filter tabs + counts */}
-                <div className="flex items-center justify-between px-4 pt-3 pb-2">
+                <div className="flex items-center justify-between px-3 pt-2 pb-1.5">
                     <span className="text-white text-xs font-semibold flex items-center gap-1.5">
                         <IoTimeOutline size={13} className="text-gray-400" />
                         Room History
@@ -236,7 +274,7 @@ export default function ProfilePanel({ isOpen, onClose }: ProfilePanelProps) {
 
                 {/* Room List */}
                 <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-1.5">
-                    {loading && !fetched ? (
+                    {loading && rooms.length === 0 ? (
                         /* Skeleton loading */
                         <div className="space-y-2 py-2">
                             {[1, 2, 3].map((i) => (
@@ -248,13 +286,18 @@ export default function ProfilePanel({ isOpen, onClose }: ProfilePanelProps) {
                             <MdOutlineMeetingRoom size={28} className="text-gray-600" />
                             <p className="text-gray-500 text-xs">
                                 {filter === "all"
-                                    ? "No rooms yet. Create or join one!"
+                                    ? "No rooms yet. Enter a room name above to join!"
                                     : `No ${filter} rooms yet.`}
                             </p>
                         </div>
                     ) : (
                         filteredRooms.map((room) => (
-                            <RoomCard key={room.roomId} room={room} onSwitch={switchRoom} />
+                            <RoomCard
+                                key={room.roomId}
+                                room={room}
+                                isCurrent={room.roomId === currentRoomId}
+                                onSwitch={switchRoom}
+                            />
                         ))
                     )}
                 </div>
@@ -264,15 +307,32 @@ export default function ProfilePanel({ isOpen, onClose }: ProfilePanelProps) {
 }
 
 /* ── Room card ──────────────────────────────────────────────────────────────── */
-function RoomCard({ room, onSwitch }: { room: RoomEntry; onSwitch: (id: string) => void }) {
+function RoomCard({
+    room,
+    isCurrent,
+    onSwitch,
+}: {
+    room: RoomEntry
+    isCurrent: boolean
+    onSwitch: (id: string) => void
+}) {
     return (
-        <div className="group flex items-center gap-3 rounded-xl px-3 py-2.5 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.05] hover:border-primary/20 transition-all duration-150 cursor-default">
+        <div
+            onClick={() => onSwitch(room.roomId)}
+            className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-150 cursor-pointer ${
+                isCurrent
+                    ? "bg-primary/[0.07] border border-primary/30 shadow-[0_0_15px_rgba(57,224,121,0.06)]"
+                    : "bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.05] hover:border-primary/30"
+            }`}
+        >
             {/* Icon */}
             <div
-                className={`flex-shrink-0 h-8 w-8 rounded-lg flex items-center justify-center ${
-                    room.isOwner
+                className={`flex-shrink-0 h-8 w-8 rounded-lg flex items-center justify-center transition-colors ${
+                    isCurrent
+                        ? "bg-primary/20 text-primary"
+                        : room.isOwner
                         ? "bg-primary/10 text-primary"
-                        : "bg-white/[0.06] text-gray-400"
+                        : "bg-white/[0.06] text-gray-400 group-hover:text-gray-300"
                 }`}
             >
                 {room.isOwner ? <LuCrown size={14} /> : <LuUsers size={14} />}
@@ -281,15 +341,21 @@ function RoomCard({ room, onSwitch }: { room: RoomEntry; onSwitch: (id: string) 
             {/* Info */}
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
-                    <span className="text-white text-xs font-medium truncate">{room.roomId}</span>
-                    {room.isOwner && (
-                        <span className="flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-medium">
+                    <span className="text-white text-xs font-semibold truncate">{room.roomId}</span>
+                    {isCurrent && (
+                        <span className="flex-shrink-0 text-[9px] px-1.5 py-0.2 rounded-full bg-primary/20 text-primary border border-primary/30 font-medium flex items-center gap-1">
+                            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                            current
+                        </span>
+                    )}
+                    {room.isOwner && !isCurrent && (
+                        <span className="flex-shrink-0 text-[9px] px-1.5 py-0.2 rounded-full bg-primary/10 text-primary border border-primary/20 font-medium">
                             owner
                         </span>
                     )}
                 </div>
                 <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-gray-500 text-[10px]">
+                    <span className="text-gray-400 text-[10px]">
                         {room.memberCount} member{room.memberCount !== 1 ? "s" : ""}
                     </span>
                     <span className="text-gray-600 text-[10px]">·</span>
@@ -297,16 +363,25 @@ function RoomCard({ room, onSwitch }: { room: RoomEntry; onSwitch: (id: string) 
                 </div>
             </div>
 
-            {/* Switch button */}
-            <button
-                onClick={() => onSwitch(room.roomId)}
-                className="flex-shrink-0 flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] font-semibold text-primary bg-primary/10 hover:bg-primary/20 border border-primary/20 hover:border-primary/40 transition-all duration-150 opacity-0 group-hover:opacity-100 cursor-pointer"
-                title={`Switch to ${room.roomId}`}
-                aria-label={`Switch to room ${room.roomId}`}
-            >
-                <LuExternalLink size={10} />
-                Switch
-            </button>
+            {/* Switch / Status Action */}
+            {isCurrent ? (
+                <span className="flex-shrink-0 text-[10px] text-primary/80 font-medium px-2 py-1 rounded-md bg-primary/10">
+                    Active
+                </span>
+            ) : (
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation()
+                        onSwitch(room.roomId)
+                    }}
+                    className="flex-shrink-0 flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold text-primary bg-primary/10 hover:bg-primary/25 border border-primary/25 hover:border-primary/50 transition-all duration-150 cursor-pointer"
+                    title={`Switch to ${room.roomId}`}
+                    aria-label={`Switch to room ${room.roomId}`}
+                >
+                    <span>Switch</span>
+                    <LuExternalLink size={11} />
+                </button>
+            )}
         </div>
     )
 }

@@ -110,9 +110,24 @@ io.on("connection", (socket) => {
 				return
 			}
 
-			// Check is username exist in the room
+			// Clean up previous room memberships for this socket before joining new room
+			const prevEntries = userSocketMap.filter((u) => u.socketId === socket.id)
+			for (const prevUser of prevEntries) {
+				if (prevUser.roomId !== normalizedRoomId) {
+					socket.broadcast
+						.to(prevUser.roomId)
+						.emit("voice-user-left", { socketId: socket.id })
+					socket.broadcast
+						.to(prevUser.roomId)
+						.emit(SocketEvent.USER_DISCONNECTED, { user: prevUser })
+					socket.leave(prevUser.roomId)
+				}
+			}
+			userSocketMap = userSocketMap.filter((u) => u.socketId !== socket.id)
+
+			// Check is username exist in the room (ignoring this socket)
 			const isUsernameExist = getUsersInRoom(normalizedRoomId).filter(
-				(u) => u.username === normalizedUsername
+				(u) => u.username.toLowerCase() === normalizedUsername.toLowerCase() && u.socketId !== socket.id
 			)
 			if (isUsernameExist.length > 0) {
 				io.to(socket.id).emit(SocketEvent.USERNAME_EXISTS)
