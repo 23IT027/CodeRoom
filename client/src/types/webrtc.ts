@@ -35,4 +35,6 @@ export enum CallStatus {
 
 export interface WebRTCConfig {
     iceServers: RTCIceServer[]
+    iceCandidatePoolSize?: number
+    bundlePolicy?: RTCBundlePolicy
 }

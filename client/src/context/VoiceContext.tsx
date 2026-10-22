@@ -40,27 +40,35 @@ export const useVoice = (): VoiceContextType => {
     return context
 }
 
-// WebRTC configuration with both STUN and TURN servers for cross-network support
+// WebRTC configuration with reliable STUN + TURN servers for cross-network support
 const voiceRTCConfig: RTCConfiguration = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:stun.stunprotocol.org:3478' },
         {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
+            urls: [
+                'turn:global.relay.metered.ca:80',
+                'turn:global.relay.metered.ca:443',
+                'turn:global.relay.metered.ca:443?transport=tcp',
+                'turns:global.relay.metered.ca:443',
+            ],
+            username: 'e499a98a2a36b8b2c7b77c0d',
+            credential: 'TxOXSXjcmpV2k+ot',
         },
         {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-        },
-        {
-            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
+            urls: [
+                'turn:relay1.expressturn.com:3478',
+            ],
+            username: 'efIBGOGBIPBMYFQGOM',
+            credential: 'qrOkEIriNqFDu2Ek',
         },
     ],
+    iceCandidatePoolSize: 10,
+    bundlePolicy: 'max-bundle' as RTCBundlePolicy,
 }
 
 const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -79,6 +87,9 @@ const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
     const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
     const audioLevelsRef = useRef<Map<string, number>>(new Map())
+    // Buffer ICE candidates per peer until remote description is set
+    const iceCandidateBuffersRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
+    const remoteDescriptionSetRef = useRef<Map<string, boolean>>(new Map())
 
     // Keep a ref to isConnected so socket handlers can read it without stale closures
     const isConnectedRef = useRef(false)
@@ -102,6 +113,8 @@ const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         }
 
         audioLevelsRef.current.delete(socketId)
+        iceCandidateBuffersRef.current.delete(socketId)
+        remoteDescriptionSetRef.current.delete(socketId)
 
         setVoiceState(prev => {
             const newParticipants = new Map(prev.participants)
@@ -133,6 +146,8 @@ const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         peerConnectionsRef.current.clear()
         audioElementsRef.current.clear()
         audioLevelsRef.current.clear()
+        iceCandidateBuffersRef.current.clear()
+        remoteDescriptionSetRef.current.clear()
 
         isConnectedRef.current = false
 
@@ -155,6 +170,10 @@ const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             peerConnectionsRef.current.delete(socketId)
         }
 
+        // Reset ICE buffer for this peer
+        iceCandidateBuffersRef.current.set(socketId, [])
+        remoteDescriptionSetRef.current.set(socketId, false)
+
         const pc = new RTCPeerConnection(voiceRTCConfig)
 
         pc.onicecandidate = (event) => {
@@ -167,7 +186,7 @@ const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         }
 
         pc.ontrack = (event) => {
-            const remoteStream = event.streams[0]
+            const remoteStream = event.streams[0] || new MediaStream([event.track])
 
             setVoiceState(prev => {
                 const newRemoteStreams = new Map(prev.remoteStreams)
@@ -203,6 +222,14 @@ const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             }
         }
 
+        pc.oniceconnectionstatechange = () => {
+            console.log(`[Voice] ICE state with ${socketId}:`, pc.iceConnectionState)
+            if (pc.iceConnectionState === 'failed') {
+                console.warn(`[Voice] ICE failed with ${socketId}, attempting restart`)
+                pc.restartIce()
+            }
+        }
+
         // Add local stream tracks
         if (localStreamRef.current) {
             localStreamRef.current.getTracks().forEach(track => {
@@ -216,8 +243,8 @@ const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         if (isInitiator) {
             pc.createOffer()
                 .then(offer => pc.setLocalDescription(offer).then(() => offer))
-                .then(offer => {
-                    socket.emit('voice-offer', { targetSocketId: socketId, offer })
+                .then(() => {
+                    socket.emit('voice-offer', { targetSocketId: socketId, offer: pc.localDescription })
                 })
                 .catch(err => console.error('[Voice] Failed to create offer:', err))
         }
@@ -323,13 +350,13 @@ const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         const onVoiceOffer = async ({ fromSocketId, fromUsername, offer }: { fromSocketId: string; fromUsername?: string; offer: RTCSessionDescriptionInit }) => {
             if (!isConnectedRef.current) return
 
-            // Add participant entry if not yet present — use server-provided username, not socket ID
+            // Add participant entry if not yet present
             setVoiceState(prev => {
                 if (prev.participants.has(fromSocketId)) return prev
                 const newParticipants = new Map(prev.participants)
                 newParticipants.set(fromSocketId, {
                     socketId: fromSocketId,
-                    username: fromUsername || fromSocketId,  // real username from server
+                    username: fromUsername || fromSocketId,
                     isMuted: false,
                     isConnected: false,
                     audioLevel: 0,
@@ -340,9 +367,18 @@ const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             const pc = createPeerConnection(fromSocketId, false)
             try {
                 await pc.setRemoteDescription(new RTCSessionDescription(offer))
+                remoteDescriptionSetRef.current.set(fromSocketId, true)
+
+                // Flush buffered ICE candidates
+                const buffered = iceCandidateBuffersRef.current.get(fromSocketId) || []
+                for (const c of buffered) {
+                    try { await pc.addIceCandidate(new RTCIceCandidate(c)) } catch {}
+                }
+                iceCandidateBuffersRef.current.set(fromSocketId, [])
+
                 const answer = await pc.createAnswer()
                 await pc.setLocalDescription(answer)
-                socket.emit('voice-answer', { targetSocketId: fromSocketId, answer })
+                socket.emit('voice-answer', { targetSocketId: fromSocketId, answer: pc.localDescription })
             } catch (err) {
                 console.error('[Voice] Failed to handle offer:', err)
             }
@@ -353,6 +389,14 @@ const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             if (pc) {
                 try {
                     await pc.setRemoteDescription(new RTCSessionDescription(answer))
+                    remoteDescriptionSetRef.current.set(fromSocketId, true)
+
+                    // Flush buffered ICE candidates
+                    const buffered = iceCandidateBuffersRef.current.get(fromSocketId) || []
+                    for (const c of buffered) {
+                        try { await pc.addIceCandidate(new RTCIceCandidate(c)) } catch {}
+                    }
+                    iceCandidateBuffersRef.current.set(fromSocketId, [])
                 } catch (err) {
                     console.error('[Voice] Failed to set answer:', err)
                 }
@@ -362,6 +406,14 @@ const VoiceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         const onVoiceIceCandidate = async ({ fromSocketId, candidate }: { fromSocketId: string; candidate: RTCIceCandidateInit }) => {
             const pc = peerConnectionsRef.current.get(fromSocketId)
             if (pc) {
+                const rdSet = remoteDescriptionSetRef.current.get(fromSocketId)
+                if (!rdSet) {
+                    // Buffer until remote description is set
+                    const buf = iceCandidateBuffersRef.current.get(fromSocketId) || []
+                    buf.push(candidate)
+                    iceCandidateBuffersRef.current.set(fromSocketId, buf)
+                    return
+                }
                 try {
                     await pc.addIceCandidate(new RTCIceCandidate(candidate))
                 } catch (err) {

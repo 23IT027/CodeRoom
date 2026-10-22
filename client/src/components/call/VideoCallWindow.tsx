@@ -32,8 +32,11 @@ const VideoCallWindow: React.FC = () => {
         }
     }, [callState.remoteStream])
 
-    // Only show when in a call
-    if (!callState.isInCall || callStatus === CallStatus.IDLE) {
+    // Show when in a call OR while connecting (CONNECTING/RINGING phases after accept)
+    if (
+        callStatus === CallStatus.IDLE ||
+        (!callState.isInCall && callStatus !== CallStatus.CONNECTING)
+    ) {
         return null
     }
 

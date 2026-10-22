@@ -40,26 +40,36 @@ export const useWebRTC = (): WebRTCContextType => {
 }
 
 // WebRTC Configuration with STUN + TURN servers for cross-device / cross-network support
+// Uses multiple reliable public STUN/TURN servers as fallbacks
 const webRTCConfig: WebRTCConfig = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:stun.stunprotocol.org:3478' },
+        { urls: 'stun:stun.voip.blackberry.com:3478' },
         {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
+            urls: [
+                'turn:global.relay.metered.ca:80',
+                'turn:global.relay.metered.ca:443',
+                'turn:global.relay.metered.ca:443?transport=tcp',
+                'turns:global.relay.metered.ca:443',
+            ],
+            username: 'e499a98a2a36b8b2c7b77c0d',
+            credential: 'TxOXSXjcmpV2k+ot',
         },
         {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-        },
-        {
-            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
+            urls: [
+                'turn:relay1.expressturn.com:3478',
+            ],
+            username: 'efIBGOGBIPBMYFQGOM',
+            credential: 'qrOkEIriNqFDu2Ek',
         },
     ],
+    iceCandidatePoolSize: 10,
+    bundlePolicy: 'max-bundle' as RTCBundlePolicy,
 }
 
 // Helper: emit both socketId and username so server can fall back to username lookup
@@ -92,12 +102,20 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
     const localStreamRef = useRef<MediaStream | null>(null)
+    // Buffer ICE candidates that arrive before remote description is set
+    const iceCandidateBufferRef = useRef<RTCIceCandidateInit[]>([])
+    const remoteDescriptionSetRef = useRef<boolean>(false)
+    const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     const isVideoEnabled = localMediaState.video
     const isAudioEnabled = localMediaState.audio
 
     // ─── Cleanup ────────────────────────────────────────────────────────────────
     const cleanupWebRTC = useCallback(() => {
+        if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current)
+            connectionTimeoutRef.current = null
+        }
         if (localStreamRef.current) {
             localStreamRef.current.getTracks().forEach(track => track.stop())
             localStreamRef.current = null
@@ -106,6 +124,8 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             peerConnectionRef.current.close()
             peerConnectionRef.current = null
         }
+        iceCandidateBufferRef.current = []
+        remoteDescriptionSetRef.current = false
         setCallState({ isInCall: false, isIncomingCall: false, isOutgoingCall: false, callType: 'video' })
         setCallStatus(CallStatus.IDLE)
         setLocalMediaState({ video: true, audio: true })
@@ -114,6 +134,9 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
     // ─── Create Peer Connection ──────────────────────────────────────────────────
     const createPeerConnection = useCallback(() => {
+        remoteDescriptionSetRef.current = false
+        iceCandidateBufferRef.current = []
+
         const pc = new RTCPeerConnection(webRTCConfig)
 
         pc.onicecandidate = (event) => {
@@ -129,22 +152,42 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         }
 
         pc.ontrack = (event) => {
-            setCallState(prev => ({ ...prev, remoteStream: event.streams[0] }))
+            const stream = event.streams[0] || new MediaStream([event.track])
+            setCallState(prev => ({ ...prev, remoteStream: stream }))
         }
 
         pc.onconnectionstatechange = () => {
             console.log('[WebRTC] Connection state:', pc.connectionState)
             if (pc.connectionState === 'connected') {
+                if (connectionTimeoutRef.current) {
+                    clearTimeout(connectionTimeoutRef.current)
+                    connectionTimeoutRef.current = null
+                }
                 setCallStatus(CallStatus.CONNECTED)
-            } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-                toast.error('Call connection failed')
+                setCallState(prev => ({ ...prev, isInCall: true }))
+            } else if (pc.connectionState === 'failed') {
+                toast.error('Call connection failed — network issue or TURN server unavailable')
                 cleanupWebRTC()
             }
         }
 
         pc.oniceconnectionstatechange = () => {
             console.log('[WebRTC] ICE state:', pc.iceConnectionState)
+            if (pc.iceConnectionState === 'failed') {
+                console.warn('[WebRTC] ICE failed, attempting restart...')
+                pc.restartIce()
+            }
         }
+
+        // Start connection timeout (30s)
+        if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current)
+        connectionTimeoutRef.current = setTimeout(() => {
+            if (peerConnectionRef.current?.connectionState !== 'connected') {
+                console.warn('[WebRTC] Connection timed out after 30s')
+                toast.error('Call timed out — could not establish connection')
+                cleanupWebRTC()
+            }
+        }, 30000)
 
         return pc
     }, [socket, cleanupWebRTC])
@@ -333,14 +376,18 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             const pc = peerConnectionRef.current
             if (!pc || !callStateRef.current.isOutgoingCall) return
             try {
-                const offer = await pc.createOffer()
+                const offer = await pc.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true,
+                })
                 await pc.setLocalDescription(offer)
                 socket.emit(SocketEvent.CALL_OFFER, {
                     ...makeTarget(from),
-                    offer,
+                    offer: pc.localDescription, // use finalised local description
                     callType: 'video',
                 })
-                setCallState(prev => ({ ...prev, isInCall: true, isOutgoingCall: false }))
+                // Keep isOutgoingCall=true until fully connected so we can route ICE candidates
+                setCallState(prev => ({ ...prev, isInCall: true }))
                 setCallStatus(CallStatus.CONNECTING)
             } catch (err) {
                 console.error('[WebRTC] Failed to create offer:', err)
@@ -354,11 +401,19 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             if (!pc) return
             try {
                 await pc.setRemoteDescription(new RTCSessionDescription(offer))
+                remoteDescriptionSetRef.current = true
+
+                // Flush buffered ICE candidates that arrived before remote description
+                for (const buffered of iceCandidateBufferRef.current) {
+                    try { await pc.addIceCandidate(new RTCIceCandidate(buffered)) } catch {}
+                }
+                iceCandidateBufferRef.current = []
+
                 const answer = await pc.createAnswer()
                 await pc.setLocalDescription(answer)
                 socket.emit(SocketEvent.CALL_ANSWER, {
                     ...makeTarget(from),
-                    answer,
+                    answer: pc.localDescription,
                 })
             } catch (err) {
                 console.error('[WebRTC] Failed to handle offer:', err)
@@ -372,15 +427,27 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             if (!pc) return
             try {
                 await pc.setRemoteDescription(new RTCSessionDescription(answer))
+                remoteDescriptionSetRef.current = true
+
+                // Flush buffered ICE candidates
+                for (const buffered of iceCandidateBufferRef.current) {
+                    try { await pc.addIceCandidate(new RTCIceCandidate(buffered)) } catch {}
+                }
+                iceCandidateBufferRef.current = []
             } catch (err) {
                 console.error('[WebRTC] Failed to set answer:', err)
             }
         }
 
-        // ICE candidate exchange
+        // ICE candidate exchange — buffer if remote description not yet set
         const onIceCandidate = async ({ candidate }: { candidate: RTCIceCandidateInit }) => {
             const pc = peerConnectionRef.current
             if (!pc || !candidate) return
+            if (!remoteDescriptionSetRef.current) {
+                // Buffer until remote description is applied
+                iceCandidateBufferRef.current.push(candidate)
+                return
+            }
             try {
                 await pc.addIceCandidate(new RTCIceCandidate(candidate))
             } catch (err) {
