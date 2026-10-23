@@ -28,6 +28,28 @@ const SessionLogSchema = new Schema(
 	{ _id: false },
 )
 
+const ChatAttachmentSchema = new Schema(
+	{
+		name: { type: String, required: true },
+		type: { type: String, required: true },
+		mimeType: { type: String, default: "" },
+		size: { type: Number, default: 0 },
+		url: { type: String, required: true },
+	},
+	{ _id: false },
+)
+
+const ChatMessageSchema = new Schema(
+	{
+		id: { type: String, required: true },
+		username: { type: String, required: true, trim: true },
+		message: { type: String, default: "" },
+		timestamp: { type: String, required: true },
+		attachment: { type: ChatAttachmentSchema, default: undefined },
+	},
+	{ _id: false },
+)
+
 const TwoFaSchema = new Schema(
 	{
 		enabled: { type: Boolean, default: false },
@@ -51,6 +73,7 @@ const RoomSchema = new Schema(
 		twoFa: { type: TwoFaSchema, default: () => ({ enabled: false }) },
 		members: { type: [MemberSchema], default: [] },
 		sessionLogs: { type: [SessionLogSchema], default: [] },
+		chatMessages: { type: [ChatMessageSchema], default: [] },
 		fileStructure: { type: Schema.Types.Mixed, default: null },
 		lastActiveAt: { type: Date, default: Date.now },
 	},

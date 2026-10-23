@@ -240,20 +240,23 @@ io.on("connection", (socket) => {
 			socket.broadcast.to(normalizedRoomId).emit(SocketEvent.USER_JOINED, { user })
 			const users = getUsersInRoom(normalizedRoomId)
 			let savedFileStructure: any = null
+			let savedChatMessages: any[] = []
 			if (isDBConnected()) {
 				try {
 					const roomDoc = await Room.findOne({ roomId: normalizedRoomId })
-						.select("fileStructure")
+						.select("fileStructure chatMessages")
 						.lean()
 					savedFileStructure = roomDoc?.fileStructure || null
+					savedChatMessages = Array.isArray(roomDoc?.chatMessages) ? roomDoc.chatMessages : []
 				} catch (err) {
-					console.error("Error reading room fileStructure:", err)
+					console.error("Error reading room fileStructure and chatMessages:", err)
 				}
 			}
 			io.to(socket.id).emit(SocketEvent.JOIN_ACCEPTED, {
 				user,
 				users,
 				fileStructure: savedFileStructure,
+				chatMessages: savedChatMessages,
 			})
 		} catch (err) {
 			console.error("JOIN_REQUEST failed:", err)
@@ -426,12 +429,31 @@ io.on("connection", (socket) => {
 	})
 
 	// Handle chat actions
-	socket.on(SocketEvent.SEND_MESSAGE, ({ message }) => {
+	socket.on(SocketEvent.SEND_MESSAGE, async ({ message }) => {
 		const roomId = getRoomId(socket.id)
 		if (!roomId) return
 		socket.broadcast
 			.to(roomId)
 			.emit(SocketEvent.RECEIVE_MESSAGE, { message })
+
+		if (isDBConnected() && message) {
+			try {
+				await Room.updateOne(
+					{ roomId },
+					{
+						$push: {
+							chatMessages: {
+								$each: [message],
+								$slice: -200,
+							},
+						},
+						$set: { lastActiveAt: new Date() },
+					},
+				)
+			} catch (err) {
+				console.error("Error saving chat message to MongoDB:", err)
+			}
+		}
 	})
 
 	// Handle cursor position
@@ -1515,6 +1537,31 @@ app.get("/api/room/:roomId/logs", async (req: Request, res: Response) => {
 	} catch (err) {
 		console.error("Error fetching room logs:", err)
 		res.status(500).json({ error: "Failed to fetch room logs" })
+	}
+})
+
+// Returns chat messages for a room
+app.get("/api/room/:roomId/chat", async (req: Request, res: Response) => {
+	try {
+		const { roomId } = req.params
+		if (!roomId || roomId.trim().length === 0) {
+			res.status(400).json({ error: "roomId is required" })
+			return
+		}
+		if (!isDBConnected()) {
+			res.json({ messages: [] })
+			return
+		}
+		const room = await Room.findOne({ roomId: roomId.trim() })
+			.select("chatMessages")
+			.lean()
+
+		res.json({
+			messages: Array.isArray(room?.chatMessages) ? room.chatMessages : [],
+		})
+	} catch (err) {
+		console.error("Error fetching room chat:", err)
+		res.status(500).json({ error: "Failed to fetch room chat" })
 	}
 })
 

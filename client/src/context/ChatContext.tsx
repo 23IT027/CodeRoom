@@ -26,14 +26,31 @@ function ChatContextProvider({ children }: { children: ReactNode }) {
     const [lastScrollHeight, setLastScrollHeight] = useState<number>(0)
 
     useEffect(() => {
+        const handleJoinAccepted = ({
+            chatMessages,
+        }: {
+            chatMessages?: ChatMessage[]
+        }) => {
+            if (Array.isArray(chatMessages)) {
+                setMessages(chatMessages)
+            }
+        }
+
+        socket.on(SocketEvent.JOIN_ACCEPTED, handleJoinAccepted)
         socket.on(
             SocketEvent.RECEIVE_MESSAGE,
             ({ message }: { message: ChatMessage }) => {
-                setMessages((messages) => [...messages, message])
+                setMessages((prev) => {
+                    if (prev.some((m) => m.id === message.id)) {
+                        return prev
+                    }
+                    return [...prev, message]
+                })
                 setIsNewMessage(true)
             },
         )
         return () => {
+            socket.off(SocketEvent.JOIN_ACCEPTED, handleJoinAccepted)
             socket.off(SocketEvent.RECEIVE_MESSAGE)
         }
     }, [socket])
