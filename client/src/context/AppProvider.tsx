@@ -11,6 +11,7 @@ import { CopilotContextProvider } from "./CopilotContext.js"
 import WebRTCProvider from "./WebRTCContext.tsx"
 import VoiceProvider from "./VoiceContext.tsx"
 import { PopupProvider } from "./PopupContext.tsx"
+import { RoomLogsProvider } from "./RoomLogsContext.tsx"
 
 function AppProvider({ children }: { children: ReactNode }) {
     return (
@@ -19,21 +20,23 @@ function AppProvider({ children }: { children: ReactNode }) {
                 <SocketProvider>
                     <WebRTCProvider>
                         <VoiceProvider>
-                            <SettingContextProvider>
-                                <ViewContextProvider>
-                                    <FileContextProvider>
-                                        <CopilotContextProvider>
-                                            <RunCodeProvider>
-                                                <PopupProvider>
-                                                    <ChatContextProvider>
-                                                        {children}
-                                                    </ChatContextProvider>
-                                                </PopupProvider>
-                                            </RunCodeProvider>
-                                        </CopilotContextProvider>
-                                    </FileContextProvider>
-                                </ViewContextProvider>
-                            </SettingContextProvider>
+                            <RoomLogsProvider>
+                                <SettingContextProvider>
+                                    <ViewContextProvider>
+                                        <FileContextProvider>
+                                            <CopilotContextProvider>
+                                                <RunCodeProvider>
+                                                    <PopupProvider>
+                                                        <ChatContextProvider>
+                                                            {children}
+                                                        </ChatContextProvider>
+                                                    </PopupProvider>
+                                                </RunCodeProvider>
+                                            </CopilotContextProvider>
+                                        </FileContextProvider>
+                                    </ViewContextProvider>
+                                </SettingContextProvider>
+                            </RoomLogsProvider>
                         </VoiceProvider>
                     </WebRTCProvider>
                 </SocketProvider>

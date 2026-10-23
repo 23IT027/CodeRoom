@@ -121,6 +121,26 @@ io.on("connection", (socket) => {
 						.to(prevUser.roomId)
 						.emit(SocketEvent.USER_DISCONNECTED, { user: prevUser })
 					socket.leave(prevUser.roomId)
+
+					// Close previous room open session log if switching rooms
+					if (isDBConnected()) {
+						try {
+							const prevRoom = await Room.findOne({ roomId: prevUser.roomId })
+							if (prevRoom && prevRoom.sessionLogs) {
+								const openPrevLog = prevRoom.sessionLogs
+									.slice()
+									.reverse()
+									.find((l: any) => l.username === prevUser.username && !l.leftAt)
+								if (openPrevLog) {
+									openPrevLog.leftAt = new Date()
+									prevRoom.markModified("sessionLogs")
+									await prevRoom.save()
+								}
+							}
+						} catch (prevErr) {
+							console.error("Failed to close prev room session log:", prevErr)
+						}
+					}
 				}
 			}
 			userSocketMap = userSocketMap.filter((u) => u.socketId !== socket.id)
@@ -151,6 +171,7 @@ io.on("connection", (socket) => {
 								lastJoinedAt: now,
 							},
 						],
+						sessionLogs: [{ username: normalizedUsername, joinedAt: now, leftAt: null }],
 						lastActiveAt: now,
 					})
 				} else {
@@ -166,7 +187,18 @@ io.on("connection", (socket) => {
 							lastJoinedAt: now,
 						})
 					}
+					// Close any previous open session logs for this user before starting a new one
+					if (!existing.sessionLogs) existing.sessionLogs = []
+					for (const log of existing.sessionLogs) {
+						if (log.username === normalizedUsername && !log.leftAt) {
+							log.leftAt = now
+						}
+					}
+					// Push a new session log entry for this join
+					existing.sessionLogs.push({ username: normalizedUsername, joinedAt: now, leftAt: null })
 					existing.lastActiveAt = now
+					existing.markModified("sessionLogs")
+					existing.markModified("members")
 					await existing.save()
 				}
 
@@ -203,7 +235,7 @@ io.on("connection", (socket) => {
 		}
 	})
 
-	socket.on("disconnecting", () => {
+	socket.on("disconnecting", async () => {
 		const user = getUserBySocketId(socket.id)
 		if (!user) return
 		const roomId = user.roomId
@@ -212,6 +244,30 @@ io.on("connection", (socket) => {
 			.emit(SocketEvent.USER_DISCONNECTED, { user })
 		userSocketMap = userSocketMap.filter((u) => u.socketId !== socket.id)
 		socket.leave(roomId)
+
+		// Update the most recent open session log entry for this user
+		if (isDBConnected()) {
+			try {
+				const now = new Date()
+				const room = await Room.findOne({ roomId })
+				if (room && room.sessionLogs) {
+					// Find last entry for this user that has no leftAt
+					const openLog = room.sessionLogs
+						.slice()
+						.reverse()
+						.find((l: { username: string; leftAt: Date | null }) =>
+							l.username === user.username && !l.leftAt
+						)
+					if (openLog) {
+						openLog.leftAt = now
+						room.markModified("sessionLogs")
+						await room.save()
+					}
+				}
+			} catch (err) {
+				console.error("Failed to update session log on disconnect:", err)
+			}
+		}
 	})
 
 	// Handle file actions
@@ -1373,6 +1429,43 @@ app.get("/api/user/rooms", authenticateToken, async (req: Request, res: Response
 	} catch (err) {
 		console.error("Error fetching user rooms:", err)
 		res.status(500).json({ error: "Failed to fetch room history" })
+	}
+})
+
+// ─── Room Session Logs Endpoint ───────────────────────────────────────────────
+// Returns all session logs for a room (who joined/left and when)
+// Also returns the current online members for live status overlay
+app.get("/api/room/:roomId/logs", async (req: Request, res: Response) => {
+	try {
+		const { roomId } = req.params
+		if (!roomId || roomId.trim().length === 0) {
+			res.status(400).json({ error: "roomId is required" })
+			return
+		}
+		if (!isDBConnected()) {
+			res.json({ logs: [], members: [], onlineUsernames: [] })
+			return
+		}
+		const room = await Room.findOne({ roomId: roomId.trim() })
+			.select("members sessionLogs")
+			.lean()
+
+		if (!room) {
+			res.json({ logs: [], members: [], onlineUsernames: [] })
+			return
+		}
+
+		// Build list of currently online usernames from live in-memory map
+		const onlineUsernames = getUsersInRoom(roomId.trim()).map((u) => u.username)
+
+		res.json({
+			logs: room.sessionLogs ?? [],
+			members: room.members ?? [],
+			onlineUsernames,
+		})
+	} catch (err) {
+		console.error("Error fetching room logs:", err)
+		res.status(500).json({ error: "Failed to fetch room logs" })
 	}
 })
 

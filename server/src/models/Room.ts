@@ -6,6 +6,7 @@ import mongoose, { Schema } from "mongoose"
  *   roomId, createdBy,
  *   twoFa: { enabled, secret },
  *   members: [{ username, joinedAt, lastJoinedAt }],
+ *   sessionLogs: [{ username, joinedAt, leftAt }],
  *   lastActiveAt, createdAt, updatedAt
  * }
  */
@@ -14,6 +15,15 @@ const MemberSchema = new Schema(
 		username: { type: String, required: true, trim: true },
 		joinedAt: { type: Date, default: Date.now },
 		lastJoinedAt: { type: Date, default: Date.now },
+	},
+	{ _id: false },
+)
+
+const SessionLogSchema = new Schema(
+	{
+		username: { type: String, required: true, trim: true },
+		joinedAt: { type: Date, required: true },
+		leftAt: { type: Date, default: null },
 	},
 	{ _id: false },
 )
@@ -40,6 +50,7 @@ const RoomSchema = new Schema(
 		createdBy: { type: String, required: true, trim: true },
 		twoFa: { type: TwoFaSchema, default: () => ({ enabled: false }) },
 		members: { type: [MemberSchema], default: [] },
+		sessionLogs: { type: [SessionLogSchema], default: [] },
 		lastActiveAt: { type: Date, default: Date.now },
 	},
 	{
