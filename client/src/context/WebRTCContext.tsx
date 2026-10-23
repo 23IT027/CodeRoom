@@ -17,6 +17,7 @@ import { useAppContext } from './AppContext'
 interface WebRTCContextType {
     callState: CallState
     callStatus: CallStatus
+    localStream: MediaStream | null
     localMediaState: MediaState
     remoteMediaState: MediaState
     initiateCall: (targetUser: RemoteUser) => void
@@ -196,30 +197,54 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const getUserMedia = useCallback(async () => {
         let stream: MediaStream
         try {
-            // Try with video first
-            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-        } catch (videoErr: unknown) {
-            const name = (videoErr as { name?: string }).name
-            if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-                // No camera — fall back to audio only
-                toast('No camera found — joining with audio only 🎙️', { icon: '⚠️' })
-                try {
-                    stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true })
-                } catch (audioErr: unknown) {
-                    const aName = (audioErr as { name?: string }).name
-                    if (aName === 'NotAllowedError' || aName === 'PermissionDeniedError') {
-                        throw new Error('PERMISSION_DENIED')
+            // Try with ideal constraints first (better resolution and framerate)
+            stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                },
+                video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    facingMode: 'user',
+                },
+            })
+        } catch {
+            try {
+                // Fallback to basic constraints
+                stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            } catch (videoErr: unknown) {
+                const name = (videoErr as { name?: string }).name
+                if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+                    // No camera — fall back to audio only
+                    toast('No camera found — joining with audio only 🎙️', { icon: '⚠️' })
+                    try {
+                        stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true })
+                    } catch (audioErr: unknown) {
+                        const aName = (audioErr as { name?: string }).name
+                        if (aName === 'NotAllowedError' || aName === 'PermissionDeniedError') {
+                            throw new Error('PERMISSION_DENIED')
+                        }
+                        throw audioErr
                     }
-                    throw audioErr
+                } else if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+                    throw new Error('PERMISSION_DENIED')
+                } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+                    throw new Error('DEVICE_IN_USE')
+                } else {
+                    throw videoErr
                 }
-            } else if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-                throw new Error('PERMISSION_DENIED')
-            } else if (name === 'NotReadableError' || name === 'TrackStartError') {
-                throw new Error('DEVICE_IN_USE')
-            } else {
-                throw videoErr
             }
         }
+
+        // Guarantee all tracks are enabled and active
+        const hasVideo = stream.getVideoTracks().length > 0
+        const hasAudio = stream.getAudioTracks().length > 0
+        stream.getVideoTracks().forEach(track => { track.enabled = true })
+        stream.getAudioTracks().forEach(track => { track.enabled = true })
+
+        setLocalMediaState({ video: hasVideo, audio: hasAudio })
         localStreamRef.current = stream
         setCallState(prev => ({ ...prev, localStream: stream }))
         return stream
@@ -245,6 +270,7 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             const pc = createPeerConnection()
             peerConnectionRef.current = pc
             stream.getTracks().forEach(track => pc.addTrack(track, stream))
+            setCallState(prev => ({ ...prev, localStream: stream }))
 
             // Send both socketId AND username so server can route reliably
             socket.emit(SocketEvent.CALL_INITIATE, {
@@ -278,7 +304,7 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             const pc = createPeerConnection()
             peerConnectionRef.current = pc
             stream.getTracks().forEach(track => pc.addTrack(track, stream))
-            setCallState(prev => ({ ...prev, isInCall: true, isIncomingCall: false }))
+            setCallState(prev => ({ ...prev, isInCall: true, isIncomingCall: false, localStream: stream }))
             socket.emit(SocketEvent.CALL_ACCEPTED, makeTarget(cs.caller))
             toast.success('Call accepted')
         } catch (error) {
@@ -317,9 +343,10 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         if (!localStreamRef.current) return
         const track = localStreamRef.current.getVideoTracks()[0]
         if (!track) return
-        track.enabled = !track.enabled
+        const newEnabled = !track.enabled
+        track.enabled = newEnabled
         setLocalMediaState(prev => {
-            const updated: MediaState = { ...prev, video: !prev.video }
+            const updated: MediaState = { ...prev, video: newEnabled }
             const cs = callStateRef.current
             const target = cs.isOutgoingCall ? cs.callee : cs.caller
             if (target) socket.emit(SocketEvent.USER_MEDIA_STATE, { targetUserId: target.socketId, mediaState: updated })
@@ -332,9 +359,10 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         if (!localStreamRef.current) return
         const track = localStreamRef.current.getAudioTracks()[0]
         if (!track) return
-        track.enabled = !track.enabled
+        const newEnabled = !track.enabled
+        track.enabled = newEnabled
         setLocalMediaState(prev => {
-            const updated: MediaState = { ...prev, audio: !prev.audio }
+            const updated: MediaState = { ...prev, audio: newEnabled }
             const cs = callStateRef.current
             const target = cs.isOutgoingCall ? cs.callee : cs.caller
             if (target) socket.emit(SocketEvent.USER_MEDIA_STATE, { targetUserId: target.socketId, mediaState: updated })
@@ -496,6 +524,7 @@ const WebRTCProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         <WebRTCContext.Provider value={{
             callState,
             callStatus,
+            localStream: callState.localStream || localStreamRef.current,
             localMediaState,
             remoteMediaState,
             initiateCall,

@@ -1,11 +1,22 @@
-interface ChatMessage {
+export type AttachmentType = 'image' | 'video' | 'audio' | 'document'
+
+export interface ChatAttachment {
+    name: string
+    type: AttachmentType
+    mimeType: string
+    size: number
+    url: string
+}
+
+export interface ChatMessage {
     id: string
     message: string
     username: string
     timestamp: string
+    attachment?: ChatAttachment
 }
 
-interface ChatContext {
+export interface ChatContext {
     messages: ChatMessage[]
     setMessages: (
         messages: ChatMessage[] | ((messages: ChatMessage[]) => ChatMessage[]),
@@ -15,5 +26,3 @@ interface ChatContext {
     lastScrollHeight: number
     setLastScrollHeight: (lastScrollHeight: number) => void
 }
-
-export { ChatContext, ChatMessage }

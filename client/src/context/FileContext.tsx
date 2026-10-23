@@ -21,6 +21,7 @@ import {
     useCallback,
     useContext,
     useEffect,
+    useRef,
     useState,
 } from "react"
 import { toast } from "react-hot-toast"
@@ -41,42 +42,79 @@ export const useFileSystem = (): FileContextType => {
 
 function FileContextProvider({ children }: { children: ReactNode }) {
     const { socket } = useSocket()
-    const { setUsers, drawingData } = useAppContext()
+    const { currentUser, setUsers, drawingData } = useAppContext()
     const { setItem, getItem } = useLocalStorage()
-
-    // Load persisted file structure from localStorage or use initial structure
-    const loadFileStructure = (): FileSystemItem => {
+    const getInitialRoomId = () => {
+        if (currentUser?.roomId) return currentUser.roomId
         try {
-            const saved = getItem('fileStructure')
+            const match = window.location.pathname.match(/\/editor\/([^/?#]+)/)
+            return match ? decodeURIComponent(match[1]) : ""
+        } catch {
+            return ""
+        }
+    }
+    const currentRoomId = currentUser?.roomId || getInitialRoomId()
+
+    const getRoomInitialStructure = useCallback((roomId: string): FileSystemItem => {
+        const idSuffix = roomId ? `_${roomId}` : ""
+        return {
+            name: "root",
+            id: `root${idSuffix}`,
+            type: "directory",
+            children: [
+                {
+                    id: `index_js${idSuffix}`,
+                    type: "file",
+                    name: "index.js",
+                    content: `// Room: ${roomId || "General"}\nfunction sayHi() {\n  console.log("👋 Hello from ${roomId || "General"}!");\n}\n\nsayHi()\n`,
+                },
+            ],
+        }
+    }, [])
+
+    // Load persisted file structure per room from localStorage
+    const loadRoomFileStructure = useCallback((roomId: string): FileSystemItem => {
+        if (!roomId) {
+            const savedLegacy = getItem("fileStructure")
+            if (savedLegacy) {
+                try {
+                    const parsed = JSON.parse(savedLegacy)
+                    if (parsed?.type === "directory" && Array.isArray(parsed.children)) return parsed
+                } catch {}
+            }
+            return initialFileStructure
+        }
+        try {
+            const saved = getItem(`fileStructure_${roomId}`)
             if (saved) {
                 const parsed = JSON.parse(saved)
-                // Validate that the parsed structure is valid
-                if (parsed && 
-                    parsed.type === 'directory' && 
-                    parsed.name === 'root' && 
+                if (
+                    parsed &&
+                    parsed.type === "directory" &&
+                    parsed.name === "root" &&
                     parsed.id &&
-                    Array.isArray(parsed.children)) {
+                    Array.isArray(parsed.children)
+                ) {
                     return parsed
                 }
             }
         } catch (error) {
-            console.error('Failed to load file structure from localStorage:', error)
-            // Clear corrupted data
-            setItem('fileStructure', '')
+            console.error(`Failed to load file structure for room ${roomId}:`, error)
         }
-        return initialFileStructure
-    }
+        return getRoomInitialStructure(roomId)
+    }, [getItem, getRoomInitialStructure])
 
-    // Load persisted open files from localStorage
-    const loadOpenFiles = (fileStructure: FileSystemItem): FileSystemItem[] => {
+    // Load persisted open files per room from localStorage
+    const loadRoomOpenFiles = useCallback((roomId: string, structure: FileSystemItem): FileSystemItem[] => {
+        const key = roomId ? `openFiles_${roomId}` : "openFiles"
         try {
-            const saved = getItem('openFiles')
+            const saved = getItem(key)
             if (saved) {
                 const parsed = JSON.parse(saved)
                 if (Array.isArray(parsed)) {
-                    const validFiles = parsed.filter(file => {
+                    const validFiles = parsed.filter((file) => {
                         if (!file || !file.id || !file.name || !file.type) return false
-                        return getFileById(fileStructure, file.id) !== null
+                        return getFileById(structure, file.id) !== null
                     })
                     if (validFiles.length > 0) {
                         return validFiles
@@ -84,102 +122,149 @@ function FileContextProvider({ children }: { children: ReactNode }) {
                 }
             }
         } catch (error) {
-            console.error('Failed to load open files from localStorage:', error)
-            setItem('openFiles', '')
+            console.error(`Failed to load open files for room ${roomId}:`, error)
         }
-        // Default: no files open after refresh
-        return []
-    }
+        const defaultFile = structure.children?.find((c) => c.type === "file")
+        return defaultFile ? [defaultFile] : []
+    }, [getItem])
 
-    // Load persisted active file from localStorage
-    const loadActiveFile = (openFiles: FileSystemItem[]): FileSystemItem | null => {
+    // Load persisted active file per room from localStorage
+    const loadRoomActiveFile = useCallback((roomId: string, openFilesList: FileSystemItem[]): FileSystemItem | null => {
+        const key = roomId ? `activeFile_${roomId}` : "activeFile"
         try {
-            const saved = getItem('activeFile')
+            const saved = getItem(key)
             if (saved) {
                 const parsed = JSON.parse(saved)
                 if (parsed && parsed.id && parsed.name) {
-                    // Find the file in open files
-                    const activeFile = openFiles.find(file => file.id === parsed.id)
-                    if (activeFile) {
-                        return activeFile
-                    }
+                    const found = openFilesList.find((file) => file.id === parsed.id)
+                    if (found) return found
                 }
             }
         } catch (error) {
-            console.error('Failed to load active file from localStorage:', error)
-            // Clear corrupted data
-            setItem('activeFile', '')
+            console.error(`Failed to load active file for room ${roomId}:`, error)
         }
-        return openFiles.length > 0 ? openFiles[0] : null
-    }
+        return openFilesList.length > 0 ? openFilesList[0] : null
+    }, [getItem])
 
-    const initialFileStructureState = loadFileStructure()
-    const initialOpenFilesState = loadOpenFiles(initialFileStructureState)
-    const initialActiveFileState = loadActiveFile(initialOpenFilesState)
+    const [fileStructure, setFileStructure] = useState<FileSystemItem>(() => loadRoomFileStructure(currentRoomId))
+    const [openFiles, setOpenFiles] = useState<FileSystemItem[]>(() => loadRoomOpenFiles(currentRoomId, fileStructure))
+    const [activeFile, setActiveFile] = useState<FileSystemItem | null>(() => loadRoomActiveFile(currentRoomId, openFiles))
 
-    const [fileStructure, setFileStructure] = useState<FileSystemItem>(initialFileStructureState)
-    const [openFiles, setOpenFiles] = useState<FileSystemItem[]>(initialOpenFilesState)
-    const [activeFile, setActiveFile] = useState<FileSystemItem | null>(initialActiveFileState)
+    const activeRoomRef = useRef<string>(currentRoomId)
+    const fileStructureRef = useRef<FileSystemItem>(fileStructure)
+    const openFilesRef = useRef<FileSystemItem[]>(openFiles)
+    const activeFileRef = useRef<FileSystemItem | null>(activeFile)
 
-    // Save to localStorage whenever file structure changes
+    useEffect(() => { fileStructureRef.current = fileStructure }, [fileStructure])
+    useEffect(() => { openFilesRef.current = openFiles }, [openFiles])
+    useEffect(() => { activeFileRef.current = activeFile }, [activeFile])
+
+    // Automatically transition files and tabs when currentRoomId changes
     useEffect(() => {
-        setItem('fileStructure', JSON.stringify(fileStructure))
-    }, [fileStructure, setItem])
+        if (!currentRoomId || currentRoomId === activeRoomRef.current) {
+            if (currentRoomId) activeRoomRef.current = currentRoomId
+            return
+        }
 
-    // Save to localStorage whenever open files change
-    useEffect(() => {
-        setItem('openFiles', JSON.stringify(openFiles))
-    }, [openFiles, setItem])
+        const prevRoom = activeRoomRef.current
+        activeRoomRef.current = currentRoomId
 
-    // Save to localStorage whenever active file changes
+        console.log(`[FileContext] Switching workspace storage from "${prevRoom}" to "${currentRoomId}"`)
+
+        // 1. Save previous room's files before switching
+        if (prevRoom) {
+            try {
+                let currentFs = fileStructureRef.current
+                if (activeFileRef.current) {
+                    const updateInDir = (dir: FileSystemItem): FileSystemItem => {
+                        if (dir.type === "file" && dir.id === activeFileRef.current!.id) {
+                            return { ...dir, content: activeFileRef.current!.content }
+                        }
+                        if (dir.children) {
+                            return { ...dir, children: dir.children.map(updateInDir) }
+                        }
+                        return dir
+                    }
+                    currentFs = updateInDir(currentFs)
+                }
+
+                setItem(`fileStructure_${prevRoom}`, JSON.stringify(currentFs))
+                setItem(`openFiles_${prevRoom}`, JSON.stringify(openFilesRef.current))
+                if (activeFileRef.current) {
+                    setItem(`activeFile_${prevRoom}`, JSON.stringify(activeFileRef.current))
+                }
+                socket.emit("save-room-files", { roomId: prevRoom, fileStructure: currentFs })
+            } catch (err) {
+                console.error(`Error saving workspace for ${prevRoom}:`, err)
+            }
+        }
+
+        // 2. Load the target room's files and tabs
+        const targetStructure = loadRoomFileStructure(currentRoomId)
+        const targetOpenFiles = loadRoomOpenFiles(currentRoomId, targetStructure)
+        const targetActiveFile = loadRoomActiveFile(currentRoomId, targetOpenFiles)
+
+        setFileStructure(targetStructure)
+        setOpenFiles(targetOpenFiles)
+        setActiveFile(targetActiveFile)
+    }, [currentRoomId, getItem, setItem, loadRoomFileStructure, loadRoomOpenFiles, loadRoomActiveFile, socket])
+
+    // Save to room-scoped storage whenever fileStructure changes
     useEffect(() => {
+        if (!currentRoomId) return
+        setItem(`fileStructure_${currentRoomId}`, JSON.stringify(fileStructure))
+
+        const timer = setTimeout(() => {
+            socket.emit("save-room-files", { roomId: currentRoomId, fileStructure })
+        }, 600)
+
+        return () => clearTimeout(timer)
+    }, [currentRoomId, fileStructure, setItem, socket])
+
+    // Save open files per room
+    useEffect(() => {
+        if (!currentRoomId) return
+        setItem(`openFiles_${currentRoomId}`, JSON.stringify(openFiles))
+    }, [currentRoomId, openFiles, setItem])
+
+    // Save active file per room
+    useEffect(() => {
+        if (!currentRoomId) return
         if (activeFile) {
-            setItem('activeFile', JSON.stringify(activeFile))
+            setItem(`activeFile_${currentRoomId}`, JSON.stringify(activeFile))
         } else {
-            setItem('activeFile', '')
+            setItem(`activeFile_${currentRoomId}`, "")
         }
-    }, [activeFile, setItem])
+    }, [currentRoomId, activeFile, setItem])
 
-    // Function to clear all persisted data
+    // Function to clear persisted data for the current room
     const clearPersistedData = useCallback(() => {
         try {
-            setItem('fileStructure', '')
-            setItem('openFiles', '')
-            setItem('activeFile', '')
-            
-            setFileStructure(initialFileStructure)
-            // Do not auto-open all root children anymore
-            const newOpenFiles: FileSystemItem[] = []
-            setOpenFiles(newOpenFiles)
-            setActiveFile(null)
-            
-            toast.success('Workspace cleared successfully')
+            if (currentRoomId) {
+                setItem(`fileStructure_${currentRoomId}`, "")
+                setItem(`openFiles_${currentRoomId}`, "")
+                setItem(`activeFile_${currentRoomId}`, "")
+            }
+            const fresh = getRoomInitialStructure(currentRoomId)
+            const defaultFile = fresh.children?.find((c) => c.type === "file") || null
+            setFileStructure(fresh)
+            setOpenFiles(defaultFile ? [defaultFile] : [])
+            setActiveFile(defaultFile)
+            toast.success("Workspace cleared successfully")
         } catch (error) {
-            console.error('Failed to clear persisted data:', error)
-            toast.error('Failed to clear workspace')
+            console.error("Failed to clear persisted data:", error)
+            toast.error("Failed to clear workspace")
         }
-    }, [setItem])
+    }, [currentRoomId, getRoomInitialStructure, setItem])
 
-    // Reset workspace when switching rooms without showing confusing toasts
+    // Reset workspace method for room transitions
     const resetWorkspace = useCallback(() => {
-        const freshInitial: FileSystemItem = {
-            name: "root",
-            id: uuidv4(),
-            type: "directory",
-            children: [
-                {
-                    id: uuidv4(),
-                    type: "file",
-                    name: "index.js",
-                    content: `function sayHi() {\n  console.log("👋 Hello world");\n}\n\nsayHi()`,
-                },
-            ],
-        }
-        const defaultFile = freshInitial.children?.[0] || null
-        setFileStructure(freshInitial)
+        const fresh = getRoomInitialStructure(currentRoomId)
+        const defaultFile = fresh.children?.find((c) => c.type === "file") || null
+        setFileStructure(fresh)
         setOpenFiles(defaultFile ? [defaultFile] : [])
         setActiveFile(defaultFile)
-    }, [])
+    }, [currentRoomId, getRoomInitialStructure])
 
     // Function to toggle the isOpen property of a directory (Directory Open/Close)
     const toggleDirectory = (dirId: Id) => {
@@ -798,6 +883,36 @@ function FileContextProvider({ children }: { children: ReactNode }) {
         [],
     )
 
+    const handleJoinAccepted = useCallback(
+        ({
+            user,
+            fileStructure: serverFileStructure,
+        }: {
+            user?: { roomId?: string }
+            users?: RemoteUser[]
+            fileStructure?: FileSystemItem | null
+        }) => {
+            const targetRoomId = user?.roomId || currentRoomId
+            if (!targetRoomId) return
+
+            if (
+                serverFileStructure &&
+                serverFileStructure.type === "directory" &&
+                Array.isArray(serverFileStructure.children) &&
+                serverFileStructure.children.length > 0
+            ) {
+                console.log(`[FileContext] Received persisted fileStructure from server for room: ${targetRoomId}`)
+                setFileStructure(serverFileStructure)
+                const targetOpenFiles = loadRoomOpenFiles(targetRoomId, serverFileStructure)
+                const targetActiveFile = loadRoomActiveFile(targetRoomId, targetOpenFiles)
+                setOpenFiles(targetOpenFiles)
+                setActiveFile(targetActiveFile)
+                setItem(`fileStructure_${targetRoomId}`, JSON.stringify(serverFileStructure))
+            }
+        },
+        [currentRoomId, loadRoomActiveFile, loadRoomOpenFiles, setItem],
+    )
+
     const handleDirCreated = useCallback(
         ({
             parentDirId,
@@ -872,6 +987,7 @@ function FileContextProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         socket.on(SocketEvent.SYNC_FILE_STRUCTURE, handleFileStructureSync)
+        socket.on(SocketEvent.JOIN_ACCEPTED, handleJoinAccepted)
         socket.on(SocketEvent.USER_JOINED, handleUserJoined)
         socket.on(SocketEvent.DIRECTORY_CREATED, handleDirCreated)
         socket.on(SocketEvent.DIRECTORY_UPDATED, handleDirUpdated)
@@ -884,6 +1000,7 @@ function FileContextProvider({ children }: { children: ReactNode }) {
 
         return () => {
             socket.off(SocketEvent.SYNC_FILE_STRUCTURE, handleFileStructureSync)
+            socket.off(SocketEvent.JOIN_ACCEPTED, handleJoinAccepted)
             socket.off(SocketEvent.USER_JOINED)
             socket.off(SocketEvent.DIRECTORY_CREATED)
             socket.off(SocketEvent.DIRECTORY_UPDATED)
@@ -903,6 +1020,7 @@ function FileContextProvider({ children }: { children: ReactNode }) {
         handleFileDeleted,
         handleFileRenamed,
         handleFileStructureSync,
+        handleJoinAccepted,
         handleFileUpdated,
         handleUserJoined,
         socket,

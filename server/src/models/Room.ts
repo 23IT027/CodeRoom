@@ -51,6 +51,7 @@ const RoomSchema = new Schema(
 		twoFa: { type: TwoFaSchema, default: () => ({ enabled: false }) },
 		members: { type: [MemberSchema], default: [] },
 		sessionLogs: { type: [SessionLogSchema], default: [] },
+		fileStructure: { type: Schema.Types.Mixed, default: null },
 		lastActiveAt: { type: Date, default: Date.now },
 	},
 	{

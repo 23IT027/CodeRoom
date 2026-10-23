@@ -110,7 +110,7 @@ io.on("connection", (socket) => {
 				return
 			}
 
-			// Clean up previous room memberships for this socket before joining new room
+			// 1. Clean up previous room memberships for this socket before joining new room
 			const prevEntries = userSocketMap.filter((u) => u.socketId === socket.id)
 			for (const prevUser of prevEntries) {
 				if (prevUser.roomId !== normalizedRoomId) {
@@ -143,16 +143,26 @@ io.on("connection", (socket) => {
 					}
 				}
 			}
-			userSocketMap = userSocketMap.filter((u) => u.socketId !== socket.id)
 
-			// Check is username exist in the room (ignoring this socket)
-			const isUsernameExist = getUsersInRoom(normalizedRoomId).filter(
-				(u) => u.username.toLowerCase() === normalizedUsername.toLowerCase() && u.socketId !== socket.id
+			// 2. Clean up any existing/stale session for this same username in the target room
+			// (e.g. from previous visits, page reloads, tab switches, or room switches)
+			const staleUsersInRoom = getUsersInRoom(normalizedRoomId).filter(
+				(u) => u.username.toLowerCase() === normalizedUsername.toLowerCase()
 			)
-			if (isUsernameExist.length > 0) {
-				io.to(socket.id).emit(SocketEvent.USERNAME_EXISTS)
-				return
+			for (const stale of staleUsersInRoom) {
+				if (stale.socketId !== socket.id) {
+					const staleSocket = io.sockets.sockets.get(stale.socketId)
+					if (staleSocket) {
+						staleSocket.leave(normalizedRoomId)
+						staleSocket.emit("room-switched", { roomId: normalizedRoomId })
+					}
+				}
 			}
+
+			// Remove this socket's old entries AND any old entries for this username in target room
+			userSocketMap = userSocketMap.filter(
+				(u) => u.socketId !== socket.id && !(u.roomId === normalizedRoomId && u.username.toLowerCase() === normalizedUsername.toLowerCase())
+			)
 
 			// Persist room + user in MongoDB (live presence stays in memory)
 			if (isDBConnected()) {
@@ -229,7 +239,22 @@ io.on("connection", (socket) => {
 			socket.join(normalizedRoomId)
 			socket.broadcast.to(normalizedRoomId).emit(SocketEvent.USER_JOINED, { user })
 			const users = getUsersInRoom(normalizedRoomId)
-			io.to(socket.id).emit(SocketEvent.JOIN_ACCEPTED, { user, users })
+			let savedFileStructure: any = null
+			if (isDBConnected()) {
+				try {
+					const roomDoc = await Room.findOne({ roomId: normalizedRoomId })
+						.select("fileStructure")
+						.lean()
+					savedFileStructure = roomDoc?.fileStructure || null
+				} catch (err) {
+					console.error("Error reading room fileStructure:", err)
+				}
+			}
+			io.to(socket.id).emit(SocketEvent.JOIN_ACCEPTED, {
+				user,
+				users,
+				fileStructure: savedFileStructure,
+			})
 		} catch (err) {
 			console.error("JOIN_REQUEST failed:", err)
 		}
@@ -273,14 +298,38 @@ io.on("connection", (socket) => {
 	// Handle file actions
 	socket.on(
 		SocketEvent.SYNC_FILE_STRUCTURE,
-		({ fileStructure, openFiles, activeFile, socketId }) => {
+		async ({ fileStructure, openFiles, activeFile, socketId }) => {
 			io.to(socketId).emit(SocketEvent.SYNC_FILE_STRUCTURE, {
 				fileStructure,
 				openFiles,
 				activeFile,
 			})
+			const roomId = getRoomId(socket.id)
+			if (roomId && isDBConnected() && fileStructure) {
+				try {
+					await Room.updateOne(
+						{ roomId },
+						{ $set: { fileStructure, lastActiveAt: new Date() } }
+					)
+				} catch (e) {
+					console.error("Failed to persist fileStructure:", e)
+				}
+			}
 		}
 	)
+
+	socket.on("save-room-files", async ({ roomId, fileStructure }) => {
+		const targetRoomId = roomId || getRoomId(socket.id)
+		if (!targetRoomId || !isDBConnected() || !fileStructure) return
+		try {
+			await Room.updateOne(
+				{ roomId: targetRoomId },
+				{ $set: { fileStructure, lastActiveAt: new Date() } }
+			)
+		} catch (err) {
+			console.error("Failed to save room files to MongoDB:", err)
+		}
+	})
 	socket.on(
 		SocketEvent.DIRECTORY_CREATED,
 		({ parentDirId, newDirectory }) => {

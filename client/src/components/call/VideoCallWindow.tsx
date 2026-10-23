@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react'
+import React, { useRef, useEffect, useCallback } from 'react'
 import { FiPhoneOff, FiMic, FiMicOff, FiVideo, FiVideoOff } from 'react-icons/fi'
 import { useWebRTC } from '@/context/WebRTCContext'
 import { CallStatus } from '@/types/webrtc'
@@ -7,6 +7,7 @@ const VideoCallWindow: React.FC = () => {
     const { 
         callState, 
         callStatus, 
+        localStream,
         endCall, 
         toggleVideo, 
         toggleAudio, 
@@ -16,21 +17,113 @@ const VideoCallWindow: React.FC = () => {
         remoteMediaState
     } = useWebRTC()
     
-    const localVideoRef = useRef<HTMLVideoElement>(null)
-    const remoteVideoRef = useRef<HTMLVideoElement>(null)
+    const localVideoRef = useRef<HTMLVideoElement | null>(null)
+    const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
 
-    // Set up video streams
-    useEffect(() => {
-        if (localVideoRef.current && callState.localStream) {
-            localVideoRef.current.srcObject = callState.localStream
+    const activeLocalStream = localStream || callState.localStream
+    const activeRemoteStream = callState.remoteStream
+
+    // Robust stream attachment helper: sets DOM properties and triggers play
+    const attachStream = useCallback((
+        videoEl: HTMLVideoElement | null, 
+        stream: MediaStream | null | undefined, 
+        isMuted: boolean
+    ) => {
+        if (!videoEl) return
+        if (isMuted) {
+            videoEl.muted = true
+            videoEl.defaultMuted = true
         }
-    }, [callState.localStream])
+        if (stream && videoEl.srcObject !== stream) {
+            videoEl.srcObject = stream
+        }
+        if (stream) {
+            videoEl.play().catch((err) => {
+                // Auto-play was interrupted or waiting for user interaction
+                console.warn('[WebRTC] Stream play pending/error:', err)
+            })
+        }
+    }, [])
+
+    // Callback refs ensure stream is attached immediately as soon as DOM element mounts
+    const setLocalVideoRef = useCallback((node: HTMLVideoElement | null) => {
+        localVideoRef.current = node
+        if (node && activeLocalStream) {
+            attachStream(node, activeLocalStream, true)
+        }
+    }, [activeLocalStream, attachStream])
+
+    const setRemoteVideoRef = useCallback((node: HTMLVideoElement | null) => {
+        remoteVideoRef.current = node
+        if (node && activeRemoteStream) {
+            attachStream(node, activeRemoteStream, false)
+        }
+    }, [activeRemoteStream, attachStream])
+
+    // Stream updates effect with event listeners for metadata & canplay
+    useEffect(() => {
+        const node = localVideoRef.current
+        if (!node || !activeLocalStream) return
+
+        attachStream(node, activeLocalStream, true)
+
+        const handleCanPlay = () => {
+            node.muted = true
+            node.play().catch(() => {})
+        }
+
+        node.addEventListener('loadedmetadata', handleCanPlay)
+        node.addEventListener('canplay', handleCanPlay)
+
+        return () => {
+            node.removeEventListener('loadedmetadata', handleCanPlay)
+            node.removeEventListener('canplay', handleCanPlay)
+        }
+    }, [activeLocalStream, localMediaState.video, attachStream])
 
     useEffect(() => {
-        if (remoteVideoRef.current && callState.remoteStream) {
-            remoteVideoRef.current.srcObject = callState.remoteStream
+        const node = remoteVideoRef.current
+        if (!node || !activeRemoteStream) return
+
+        attachStream(node, activeRemoteStream, false)
+
+        const handleCanPlay = () => {
+            node.play().catch(() => {})
         }
-    }, [callState.remoteStream])
+
+        node.addEventListener('loadedmetadata', handleCanPlay)
+        node.addEventListener('canplay', handleCanPlay)
+
+        return () => {
+            node.removeEventListener('loadedmetadata', handleCanPlay)
+            node.removeEventListener('canplay', handleCanPlay)
+        }
+    }, [activeRemoteStream, remoteMediaState.video, attachStream])
+
+    // Continuous self-healing watchdog: checks every 1.5s to ensure videos are playing
+    useEffect(() => {
+        const interval = setInterval(() => {
+            if (localVideoRef.current && activeLocalStream) {
+                if (localVideoRef.current.srcObject !== activeLocalStream) {
+                    localVideoRef.current.srcObject = activeLocalStream
+                }
+                if (localMediaState.video && localVideoRef.current.paused) {
+                    localVideoRef.current.muted = true
+                    localVideoRef.current.play().catch(() => {})
+                }
+            }
+            if (remoteVideoRef.current && activeRemoteStream) {
+                if (remoteVideoRef.current.srcObject !== activeRemoteStream) {
+                    remoteVideoRef.current.srcObject = activeRemoteStream
+                }
+                if (remoteMediaState.video && remoteVideoRef.current.paused) {
+                    remoteVideoRef.current.play().catch(() => {})
+                }
+            }
+        }, 1500)
+
+        return () => clearInterval(interval)
+    }, [activeLocalStream, activeRemoteStream, localMediaState.video, remoteMediaState.video])
 
     // Show when in a call OR while connecting (CONNECTING/RINGING phases after accept)
     if (
@@ -72,7 +165,7 @@ const VideoCallWindow: React.FC = () => {
             <div className="flex-1 flex items-center justify-center p-2 md:p-6 overflow-hidden">
                 <div className="relative w-full max-w-5xl aspect-video bg-black rounded-lg flex items-center justify-center shadow-inner">
                     <video
-                        ref={remoteVideoRef}
+                        ref={setRemoteVideoRef}
                         autoPlay
                         playsInline
                         className="w-full h-full object-contain rounded-lg"
@@ -107,17 +200,28 @@ const VideoCallWindow: React.FC = () => {
                             </div>
                         </div>
                     )}
-                    <div className="absolute bottom-3 right-3 w-28 h-20 md:w-40 md:h-28 rounded-md overflow-hidden border-2 border-primary bg-black/60 backdrop-blur-sm flex items-center justify-center">
-                        {localMediaState.video ? (
-                            <video
-                                ref={localVideoRef}
-                                autoPlay
-                                playsInline
-                                muted
-                                className="h-full w-full object-cover"
-                                style={{ transform: 'scaleX(-1)' }}
-                            />
-                        ) : (
+                    {/* Picture-in-Picture Local User Video Box */}
+                    <div 
+                        className="absolute bottom-3 right-3 w-28 h-20 md:w-40 md:h-28 rounded-md overflow-hidden border-2 border-primary bg-black/80 backdrop-blur-sm flex items-center justify-center shadow-lg cursor-pointer"
+                        title="Your video preview (click to refresh if needed)"
+                        onClick={() => {
+                            if (localVideoRef.current && activeLocalStream) {
+                                localVideoRef.current.muted = true
+                                localVideoRef.current.srcObject = activeLocalStream
+                                localVideoRef.current.play().catch(() => {})
+                            }
+                        }}
+                    >
+                        {/* Always keep the video element mounted to prevent hardware decode teardown */}
+                        <video
+                            ref={setLocalVideoRef}
+                            autoPlay
+                            playsInline
+                            muted
+                            className={`h-full w-full object-cover ${localMediaState.video ? 'block' : 'hidden'}`}
+                            style={{ transform: 'scaleX(-1)' }}
+                        />
+                        {!localMediaState.video && (
                             <div className="flex h-full w-full items-center justify-center bg-gray-800">
                                 <FiVideoOff className="h-6 w-6 text-gray-400" />
                             </div>
